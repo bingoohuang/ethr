@@ -52,11 +52,11 @@ func main() {
 	debug := flag.Bool("debug", false, "")
 	use4 := flag.Bool("4", false, "")
 	use6 := flag.Bool("6", false, "")
-	port := flag.Int("port", 8888, "")
+	port := flag.Int("port", 12321, "")
 	ip := flag.String("ip", "", "")
 	// Server
-	isServer := flag.Bool("s", false, "")
-	showUI := flag.Bool("ui", false, "")
+	isServer := flag.Bool("s", true, "")
+	showUI := flag.Bool("ui", true, "")
 	// Client & External Client
 	clientDest := flag.String("c", "", "")
 	bufLenStr := flag.String("l", "", "")
@@ -77,6 +77,11 @@ func main() {
 	flag.StringVar(&argIf, "if", "", "")
 
 	flag.Parse()
+
+	if *clientDest != "" || *xClientDest != "" {
+		*isServer = false
+		*showUI = false
+	}
 
 	if *isServer {
 		if *clientDest != "" {
