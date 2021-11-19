@@ -22,6 +22,7 @@ const defaultBufferLenStr = "16KB"
 var (
 	gVersion     string
 	loggingLevel LogLevel = LogLevelInfo
+	argIf        string
 )
 
 func main() {
@@ -73,6 +74,7 @@ func main() {
 	thCount := flag.Int("n", 1, "")
 	wc := flag.Int("w", 1, "")
 	xClientDest := flag.String("x", "", "")
+	flag.StringVar(&argIf, "if", "", "")
 
 	flag.Parse()
 
@@ -399,6 +401,7 @@ func ethrUsage() {
 	printIPUsage()
 	printPortUsage()
 	printFlagUsage("ui", "", "Show output in text UI.")
+	printFlagUsage("if", "", "Specified iface name.")
 
 	fmt.Println("\nMode: Client")
 	fmt.Println("================================================================================")

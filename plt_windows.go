@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 //-----------------------------------------------------------------------------
@@ -53,26 +54,29 @@ func getNetDevStats(stats *ethrNetStat) {
 			ui.printErr("%v", err)
 			return
 		}
-		rxInfo := ethrNetDevInfo{
-			bytes:   uint64(row.InOctets),
-			packets: uint64(row.InUcastPkts),
-			drop:    uint64(row.InDiscards),
-			errs:    uint64(row.InErrors),
+
+		if argIf == "" || argIf == ifi.Name {
+			rxInfo := ethrNetDevInfo{
+				bytes:   uint64(row.InOctets),
+				packets: uint64(row.InUcastPkts),
+				drop:    uint64(row.InDiscards),
+				errs:    uint64(row.InErrors),
+			}
+			txInfo := ethrNetDevInfo{
+				bytes:   uint64(row.OutOctets),
+				packets: uint64(row.OutUcastPkts),
+				drop:    uint64(row.OutDiscards),
+				errs:    uint64(row.OutErrors),
+			}
+			netStats := ethrNetDevStat{
+				interfaceName: ifi.Name,
+				rxBytes:       rxInfo.bytes,
+				txBytes:       txInfo.bytes,
+				rxPkts:        rxInfo.packets,
+				txPkts:        txInfo.packets,
+			}
+			stats.netDevStats = append(stats.netDevStats, netStats)
 		}
-		txInfo := ethrNetDevInfo{
-			bytes:   uint64(row.OutOctets),
-			packets: uint64(row.OutUcastPkts),
-			drop:    uint64(row.OutDiscards),
-			errs:    uint64(row.OutErrors),
-		}
-		netStats := ethrNetDevStat{
-			interfaceName: ifi.Name,
-			rxBytes:       rxInfo.bytes,
-			txBytes:       txInfo.bytes,
-			rxPkts:        rxInfo.packets,
-			txPkts:        txInfo.packets,
-		}
-		stats.netDevStats = append(stats.netDevStats, netStats)
 	}
 }
 

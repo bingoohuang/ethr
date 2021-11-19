@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 //-----------------------------------------------------------------------------
@@ -61,8 +62,11 @@ func getNetDevStats(stats *ethrNetStat) {
 			continue
 		}
 		netDevStat := buildNetDevStat(line)
-		if isIfUp(netDevStat.interfaceName, ifs) {
-			stats.netDevStats = append(stats.netDevStats, buildNetDevStat(line))
+
+		if argIf == "" || argIf == netDevStat.interfaceName {
+			if isIfUp(netDevStat.interfaceName, ifs) {
+				stats.netDevStats = append(stats.netDevStats, buildNetDevStat(line))
+			}
 		}
 	}
 }

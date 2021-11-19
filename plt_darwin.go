@@ -1,3 +1,4 @@
+//go:build darwin
 // +build darwin
 
 //-----------------------------------------------------------------------------
@@ -35,13 +36,15 @@ func getNetDevStats(stats *ethrNetStat) {
 			continue
 		}
 
-		stats.netDevStats = append(stats.netDevStats, ethrNetDevStat{
-			interfaceName: iface.Name,
-			rxBytes:       ifaceData.Data.Ibytes,
-			rxPkts:        ifaceData.Data.Ipackets,
-			txBytes:       ifaceData.Data.Obytes,
-			txPkts:        ifaceData.Data.Opackets,
-		})
+		if argIf == "" || argIf == iface.Name {
+			stats.netDevStats = append(stats.netDevStats, ethrNetDevStat{
+				interfaceName: iface.Name,
+				rxBytes:       ifaceData.Data.Ibytes,
+				rxPkts:        ifaceData.Data.Ipackets,
+				txBytes:       ifaceData.Data.Obytes,
+				txPkts:        ifaceData.Data.Opackets,
+			})
+		}
 	}
 }
 
