@@ -127,25 +127,18 @@ func main() {
 
 	if !ip.IsZero() {
 		gLocalIP = *ip.Str
-		ipAddr := net.ParseIP(gLocalIP)
-		if ipAddr == nil {
+		if ipAddr := net.ParseIP(gLocalIP); ipAddr == nil {
 			printUsageError(fmt.Sprintf("Invalid IP address: <%s> specified.", *ip.Str))
-		}
-		if !ipVer.IsValid(ipAddr) {
+		} else if !ipVer.IsValid(ipAddr) {
 			printUsageError(fmt.Sprintf("Invalid IP address version: <%s> specified.", *ip.Str))
 		}
 	}
-	gPort = uint16(*port.Int)
+	gPort = port.Uint16()
 	gPortStr = fmt.Sprintf("%d", gPort)
 
-	logFileName := *outputFile.Str
-	if !*noOutput.Bool {
-		if logFileName == defaultLogFileName {
-			if *isServer.Bool {
-				logFileName = "ethrs.log"
-			} else {
-				logFileName = "ethrc.log"
-			}
+	if logFileName := *outputFile.Str; !*noOutput.Bool {
+		if outputFile.IsDefault() {
+			logFileName = If(isServer.IsTrue(), "ethrs.log", "ethrc.log")
 		}
 		logInit(logFileName)
 	}
@@ -480,6 +473,7 @@ func (f *flagUsage) Uint32() uint32             { return uint32(*f.Int) }
 func (f *flagUsage) Uint8() uint8               { return uint8(*f.Int) }
 func (f *flagUsage) GetBool() bool              { return *f.Bool }
 func (f *flagUsage) GetDuration() time.Duration { return *f.Duration }
+func (f *flagUsage) Uint16() uint16             { return uint16(*f.Int) }
 
 var flags = make(map[string]*flagUsage)
 

@@ -423,3 +423,10 @@ func enforceThrottle(s time.Time, wt time.Duration, totalBytesToSend, oldSentByt
 	}
 	return
 }
+
+func If(b bool, s1, s2 string) string {
+	if b {
+		return s1
+	}
+	return s2
+}
