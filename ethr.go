@@ -123,7 +123,7 @@ func main() {
 		loggingLevel = LogLevelDebug
 	}
 
-	ipVer = setIpVer(*use4.Bool, !*use6.Bool)
+	ipVer = setIpVer(*use4.Bool, *use6.Bool)
 
 	if !ip.IsZero() {
 		gLocalIP = *ip.Str
