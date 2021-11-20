@@ -1,32 +1,106 @@
-#!make
-#-----------------------------------------------------------------------------
-# Copyright (C) Microsoft. All rights reserved.
-# Licensed under the MIT license.
-# See LICENSE.txt file in the project root for full license information.
-#-----------------------------------------------------------------------------
+.PHONY: test install
+all: test install
 
-GO_BIN ?= go
-GO_LINT ?= golint
-GO_FMT ?= gofmt
-BINARY_NAME ?= ethr
+app=$(notdir $(shell pwd))
+appVersion := 1.0.0
+goVersion := $(shell go version | sed 's/go version //'|sed 's/ /_/')
+# e.g. 2021-10-28T11:49:52+0800
+buildTime := $(shell date +%FT%T%z)
+# https://git-scm.com/docs/git-rev-list#Documentation/git-rev-list.txt-emaIem
+gitCommit := $(shell [ -f git.commit ] && cat git.commit || git rev-list --oneline --format=format:'%h@%aI' --max-count=1 `git rev-parse HEAD` | tail -1)
+#gitCommit := $(shell git rev-list -1 HEAD)
+# https://stackoverflow.com/a/47510909
+pkg := main
 
-.PHONY: fmt
-fmt:
-	find . -name '*.go' | \
-	    while read -r file; \
-	        do $(GO_FMT) -w -s "$$file"; \
-	    done
+extldflags := -extldflags -static
+# https://ms2008.github.io/2018/10/08/golang-build-version/
+# https://github.com/kubermatic/kubeone/blob/master/Makefile
+flags1 = -s -w -a -installsuffix cgo -X $(pkg).BuildTime=$(buildTime) -X $(pkg).AppVersion=$(appVersion) -X $(pkg).GitCommit=$(gitCommit) -X $(pkg).GoVersion=$(goVersion)
+flags2 = ${extldflags} ${flags1}
+goinstall1 = go install -trimpath -ldflags='${flags1}' ./...
+goinstall2 = go install -trimpath -ldflags='${flags2}' ./...
+gobin := $(shell go env GOBIN)
+# try $GOPATN/bin if $gobin is empty
+gobin := $(if $(gobin),$(gobin),$(shell go env GOPATH)/bin)
 
-.PHONY: build-docker
-build-docker: 
-	$(GO_BIN) build -o /out/$(BINARY_NAME)
+git.commit:
+	echo ${gitCommit} > git.commit
 
-.PHONY: build
-build:
-	$(GO_BIN) build -o $(BINARY_NAME) .
+tool:
+	go get github.com/securego/gosec/cmd/gosec
 
-.PHONY: lint
+sec:
+	@gosec ./...
+	@echo "[OK] Go security check was completed!"
+
+init:
+	export GOPROXY=https://goproxy.cn
+
+lint-all:
+	golangci-lint run --enable-all
+
 lint:
-	$(GO_LINT) .
+	golangci-lint run ./...
 
-.DEFAULT_GOAL := build
+fmt:
+	gofumpt -l -w .
+	gofmt -s -w .
+	go mod tidy
+	go fmt ./...
+	revive .
+	goimports -w .
+	gci -w -local github.com/daixiang0/gci
+
+install: init
+	${goinstall2}
+	upx ${gobin}/${app}
+linux: init
+	GOOS=linux GOARCH=amd64 ${goinstall2}
+	upx ${gobin}/linux_amd64/${app}
+arm: init
+	GOOS=linux GOARCH=arm64 ${goinstall2}
+	upx ${gobin}/linux_arm64/${app}
+
+upx:
+	ls -lh ${gobin}/${app}
+	upx ${gobin}/${app}
+	ls -lh ${gobin}/${app}
+	ls -lh ${gobin}/linux_amd64/${app}
+	upx ${gobin}/linux_amd64/${app}
+	ls -lh ${gobin}/linux_amd64/${app}
+
+test: init
+	#go test -v ./...
+	go test -v -race ./...
+
+bench: init
+	#go test -bench . ./...
+	go test -tags bench -benchmem -bench . ./...
+
+clean:
+	rm coverage.out
+
+cover:
+	go test -v -race -coverpkg=./... -coverprofile=coverage.out ./...
+
+coverview:
+	go tool cover -html=coverage.out
+
+# https://hub.docker.com/_/golang
+# docker run --rm -v "$PWD":/usr/src/myapp -v "$HOME/dockergo":/go -w /usr/src/myapp golang make docker
+# docker run --rm -it -v "$PWD":/usr/src/myapp -w /usr/src/myapp golang bash
+# 静态连接 glibc
+docker:
+	mkdir -p ~/dockergo
+	docker run --rm -v "$$PWD":/usr/src/myapp -v "$$HOME/dockergo":/go -w /usr/src/myapp golang make dockerinstall
+	#upx ~/dockergo/bin/${app}
+	gzip -f ~/dockergo/bin/${app}
+
+dockerinstall:
+	go install -v -x -a -ldflags=${flags} ./...
+
+targz:
+	find . -name ".DS_Store" -delete
+	find . -type f -name '\.*' -print
+	cd .. && rm -f ${app}.tar.gz && tar czvf ${app}.tar.gz --exclude .git --exclude .idea ${app}
+

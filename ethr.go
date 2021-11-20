@@ -15,18 +15,23 @@ import (
 	"time"
 )
 
-const defaultLogFileName = "./ethrs.log for server, ./ethrc.log for client"
-const latencyDefaultBufferLenStr = "1B"
-const defaultBufferLenStr = "16KB"
+const (
+	defaultLogFileName         = "./ethrs.log for server, ./ethrc.log for client"
+	latencyDefaultBufferLenStr = "1B"
+	defaultBufferLenStr        = "16KB"
+)
 
 var (
-	gVersion     = "UNKNOWN"
+	AppVersion   = "Unknown"
+	BuildTime    = "Unknown"
+	GitCommit    = "Unknown"
+	GoVersion    = "Unknown"
 	loggingLevel = LogLevelInfo
 	argIf        string
 )
 
 func main() {
-	fmt.Println("\nEthr: Comprehensive Network Performance Measurement Tool (Version: " + gVersion + ")")
+	fmt.Println("\nEthr: Comprehensive Network Performance Measurement Tool (Version: " + AppVersion + ", Build: " + BuildTime + ", GitCommit: " + GitCommit + ", GoVersion:" + GoVersion + ")")
 	fmt.Println("Maintainer: Pankaj Garg (ipankajg @ LinkedIn | GitHub | Gmail | Twitter)")
 	fmt.Println("")
 
@@ -45,21 +50,19 @@ func main() {
 	debug := flagBool("debug", false, "", "Enable debug information in logging output.")
 	use4 := flagBool("4", false, "", "Use only IP v4 version")
 	use6 := flagBool("6", false, "", "Use only IP v6 version")
-	port := flagInt("port", 12321, "<number>", "Use specified port number for TCP & UDP tests.",
-		"Default: 8888")
+	port := flagInt("port", 12321, "<number>", "Use specified port number for TCP & UDP tests.", "Default: 12321")
 	ip := flagString("ip", "", "<string>", "Bind to specified local IP address for TCP & UDP tests.",
 		"This must be a valid IPv4 or IPv6 address.",
 		"Default: <empty> - Any IP")
 	// Server
 	isServer := flagBool("s", true, "", "Run in server mode.")
-	showUI := flagBool("ui", true, "", "Show output in text UI.")
+	showUI := flagBool("ui", false, "", "Show output in text UI.")
 	// Client & External Client
 	clientDest := flagString("c", "", "<server>", "Run in client mode and connect to <server>.",
 		"Server is specified using name, FQDN or IP address.")
 	bufLenStr := flagString("l", "", "<length>",
 		"Length of buffer (in Bytes) to use (format: <num>[KB | MB | GB])",
-		"Only valid for Bandwidth tests. Max 1GB.",
-		"Default: 16KB")
+		"Only valid for Bandwidth tests. Max 1GB.", "Default: 16KB")
 	bwRateStr := flagString("b", "", "<rate>",
 		"Transmit only Bits per second (format: <num>[K | M | G])",
 		"Only valid for Bandwidth tests. Default: 0 - Unlimited",
@@ -69,17 +72,13 @@ func main() {
 		"Default: 0 - Ephemeral Port")
 	duration := flagDuration("d", 10*time.Second, "<duration>",
 		"Duration for the test (format: <num>[ms | s | m | h]",
-		"0: Run forever",
-		"Default: 10s")
+		"0: Run forever", "Default: 10s")
 	gap := flagDuration("g", time.Second, "<gap>",
 		"Time interval between successive measurements (format: <num>[ms | s | m | h]",
-		"Only valid for latency, ping and traceRoute tests.",
-		"0: No gap",
-		"Default: 1s")
+		"Only valid for latency, ping and traceRoute tests.", "0: No gap", "Default: 1s")
 	iterCount := flagInt("i", 1000, "<iterations>",
 		"Number of round trip iterations for each latency measurement.",
-		"Only valid for latency testing.",
-		"Default: 1000")
+		"Only valid for latency testing.", "Default: 1000")
 	ncs := flagBool("ncs", false, "",
 		"No per Connection Stats would be printed if this flag is specified.",
 		"This is useful to suppress verbose logging when large number of",
@@ -87,65 +86,46 @@ func main() {
 	protocol := flagString("p", "tcp", "")
 	reverse := flagBool("r", false, "", "For Bandwidth tests, receive data from server.")
 	testTypePtr := flagString("t", "", "")
-	tos := flagInt("tos", 0, "",
-		"Specifies 8-bit value to use in IPv4 TOS field or IPv6 Traffic Class field.")
-	title := flagString("T", "", "<string>",
-		"Use the given title in log files for logging results.",
-		"Default: <empty>")
-
-	thCount := flagInt("n", 1, "<number>", "Number of Parallel Sessions (and Threads).",
-		"0: Equal to number of CPUs",
-		"Default: 1")
-	wc := flagInt("w", 1, "<number>",
-		"Use specified number of iterations for warmup.",
-		"Default: 1")
+	tos := flagInt("tos", 0, "", "Specifies 8-bit value to use in IPv4 TOS field or IPv6 Traffic Class field.")
+	title := flagString("T", "", "<string>", "Use the given title in log files for logging results.", "Default: <empty>")
+	thCount := flagInt("n", 1, "<number>", "Number of Parallel Sessions (and Threads).", "0: Equal to number of CPUs", "Default: 1")
+	wc := flagInt("w", 1, "<number>", "Use specified number of iterations for warmup.", "Default: 1")
 	xClientDest := flagString("x", "", "<destination>", "Run in external client mode and connect to <destination>.",
 		"<destination> is specified in URL or Host:Port format.",
 		"For URL, if port is not specified, it is assumed to be 80 for http and 443 for https.",
 		"Example: For TCP - www.microsoft.com:443 or 10.1.0.4:22 or https://www.github.com",
 		"         For ICMP - www.microsoft.com or 10.1.0.4")
-	pIf := flagString("if", "", "<string>", "Specified iface name.",
-		"Default: <empty> - All ifaces")
+	pIf := flagString("if", "", "<string>", "Specified iface name.", "Default: <empty> - All ifaces")
 
 	flag.Parse()
 
 	argIf = *pIf.Str
 
-	if *clientDest.Str != "" || *xClientDest.Str != "" {
-		*isServer.Bool = false
-		*showUI.Bool = false
+	if !clientDest.IsZero() || !xClientDest.IsZero() {
+		isServer.SetBool(false)
+		showUI.SetBool(false)
 	}
 
-	if *isServer.Bool {
-		checkServerModeArgErrorStr(bufLenStr, bwRateStr, testTypePtr, title)
-		cport.printServerModeArgErrorInt(0)
-		duration.printServerModeArgErrorDuration(10 * time.Second)
-		gap.printServerModeArgErrorDuration(time.Second)
-		iterCount.printServerModeArgErrorInt(1000)
-		ncs.printServerModeArgErrorBool(false)
-		protocol.printServerModeArgError("tcp")
-		reverse.printServerModeArgErrorBool(false)
-		protocol.printServerModeArgErrorInt(0)
-		thCount.printServerModeArgErrorInt(1)
-		wc.printServerModeArgErrorInt(1)
-	} else if *clientDest.Str != "" || *xClientDest.Str != "" {
-		if *clientDest.Str != "" && *xClientDest.Str != "" {
+	if isServer.IsTrue() {
+		checkServerModeArgs(bufLenStr, bwRateStr, testTypePtr, title, cport, protocol, ncs, reverse, duration, gap, iterCount, thCount, wc, tos)
+	} else if !clientDest.IsZero() || !xClientDest.IsZero() {
+		if !clientDest.IsZero() && !xClientDest.IsZero() {
 			printUsageError(`Invalid argument, both "-c" and "-x" cannot be specified at the same time.`)
 		}
-		if *showUI.Bool {
+		if showUI.IsTrue() {
 			printUsageError(fmt.Sprintf(`"Invalid argument, "-%s" can only be used in server ("-s") mode.`, "ui"))
 		}
 	}
 
 	// Process common parameters.
 
-	if *debug.Bool {
+	if debug.IsTrue() {
 		loggingLevel = LogLevelDebug
 	}
 
 	ipVer = setIpVer(*use4.Bool, !*use6.Bool)
 
-	if *ip.Str != "" {
+	if !ip.IsZero() {
 		gLocalIP = *ip.Str
 		ipAddr := net.ParseIP(gLocalIP)
 		if ipAddr == nil {
@@ -188,8 +168,8 @@ func main() {
 		proto := getProtocol(*protocol.Str)
 
 		// Default latency test to 1B if length is not specified
-		if *bufLenStr.Str == "" {
-			*bufLenStr.Str = getDefaultBufferLenStr(*testTypePtr.Str)
+		if bufLenStr.IsZero() {
+			bufLenStr.SetStr(getDefaultBufferLenStr(*testTypePtr.Str))
 		}
 		bufLen := unitToNumber(*bufLenStr.Str)
 		if bufLen == 0 {
@@ -213,7 +193,7 @@ func main() {
 		}
 
 		if *iterCount.Int <= 0 {
-			printUsageError(fmt.Sprintf("Invalid iteration count for latency test: %d", *iterCount))
+			printUsageError(fmt.Sprintf("Invalid iteration count for latency test: %d", *iterCount.Int))
 		}
 
 		if *thCount.Int <= 0 {
@@ -224,15 +204,16 @@ func main() {
 
 		testId := TestID{Protocol: proto, Type: testType}
 		param := clientParam{
-			NumThreads:  uint32(*thCount.Int),
+			NumThreads:  thCount.Uint32(),
 			BufferSize:  uint32(bufLen),
-			RttCount:    uint32(*iterCount.Int),
-			Reverse:     *reverse.Bool,
-			Duration:    *duration.Duration,
-			Gap:         *gap.Duration,
-			WarmupCount: uint32(*wc.Int),
+			RttCount:    iterCount.Uint32(),
+			Reverse:     reverse.GetBool(),
+			Duration:    duration.GetDuration(),
+			Gap:         gap.GetDuration(),
+			WarmupCount: wc.Uint32(),
 			BwRate:      bwRate,
-			ToS:         uint8(*tos.Int)}
+			ToS:         tos.Uint8(),
+		}
 		validateClientParams(testId, param)
 
 		runClient(testId, *title.Str, param, destination)
@@ -368,10 +349,6 @@ func validateExtModeClientTest(testID TestID) {
 	}
 }
 
-func printServerModeArgError(arg string) {
-	printUsageError(fmt.Sprintf(`Invalid argument, "-%s" can only be used in client ("-c") mode.`, arg))
-}
-
 func emitUnsupportedTest(testID TestID) {
 	printUsageError(fmt.Sprintf(`Test: "%s" for Protocol: "%s" is not supported.`+"\n", testID.Type, testID.Protocol))
 }
@@ -434,6 +411,7 @@ func printFlagUsages(flags ...string) {
 		printFlagUsage(f)
 	}
 }
+
 func printFlagUsage(flag string, helptext ...string) {
 	var info string
 
@@ -452,86 +430,84 @@ func printFlagUsage(flag string, helptext ...string) {
 }
 
 type flagUsage struct {
-	name     string
-	Str      *string
-	Int      *int
-	Bool     *bool
-	Duration *time.Duration
-	info     string
-	helptext []string
+	name            string
+	Str             *string
+	StrDefault      string
+	Int             *int
+	IntDefault      int
+	Bool            *bool
+	BoolDefault     bool
+	Duration        *time.Duration
+	DurationDefault time.Duration
+	info            string
+	helptext        []string
 }
 
-func (f *flagUsage) IsValid() bool {
+func (f *flagUsage) IsDefault() bool {
 	switch {
 	case f.Str != nil:
-		return *f.Str != ""
+		return *f.Str == f.StrDefault
 	case f.Int != nil:
-		return *f.Int != 0
+		return *f.Int == f.IntDefault
 	case f.Bool != nil:
-		return *f.Bool != false
+		return *f.Bool == f.BoolDefault
 	case f.Duration != nil:
-		return *f.Duration != 0
+		return *f.Duration == f.DurationDefault
 	}
 
 	return false
 }
 
-func (f *flagUsage) printServerModeArgError(expect string) {
-	if *f.Str != expect {
-		printServerModeArgError(f.name)
+func (f *flagUsage) IsZero() bool {
+	switch {
+	case f.Str != nil:
+		return *f.Str == ""
+	case f.Int != nil:
+		return *f.Int == 0
+	case f.Bool != nil:
+		return *f.Bool == false
+	case f.Duration != nil:
+		return *f.Duration == 0
 	}
+
+	return false
 }
 
-func (f *flagUsage) printServerModeArgErrorInt(expect int) {
-	if *f.Int != expect {
-		printServerModeArgError(f.name)
-	}
-}
-
-func (f *flagUsage) printServerModeArgErrorBool(expect bool) {
-	if *f.Bool != expect {
-		printServerModeArgError(f.name)
-	}
-}
-
-func (f *flagUsage) printServerModeArgErrorDuration(expect time.Duration) {
-	if *f.Duration != expect {
-		printServerModeArgError(f.name)
-	}
-}
+func (f *flagUsage) IsTrue() bool               { return f.Bool != nil && *f.Bool }
+func (f *flagUsage) SetBool(b bool)             { *f.Bool = b }
+func (f *flagUsage) SetStr(s string)            { *f.Str = s }
+func (f *flagUsage) Uint32() uint32             { return uint32(*f.Int) }
+func (f *flagUsage) Uint8() uint8               { return uint8(*f.Int) }
+func (f *flagUsage) GetBool() bool              { return *f.Bool }
+func (f *flagUsage) GetDuration() time.Duration { return *f.Duration }
 
 var flags = make(map[string]*flagUsage)
 
 func flagDuration(name string, value time.Duration, info string, helptext ...string) *flagUsage {
-	fu := &flagUsage{
-		name:     name,
-		Duration: flag.Duration(name, value, ""),
-		info:     info,
-		helptext: helptext,
-	}
-	flags[name] = fu
-	return fu
+	return addFlags(&flagUsage{name: name, Duration: flag.Duration(name, value, ""), DurationDefault: value, info: info, helptext: helptext})
 }
+
 func flagBool(name string, value bool, info string, helptext ...string) *flagUsage {
-	fu := &flagUsage{name: name, Bool: flag.Bool(name, value, ""), info: info, helptext: helptext}
-	flags[name] = fu
-	return fu
+	return addFlags(&flagUsage{name: name, Bool: flag.Bool(name, value, ""), BoolDefault: value, info: info, helptext: helptext})
 }
 
 func flagInt(name string, value int, info string, helptext ...string) *flagUsage {
-	fu := &flagUsage{name: name, Int: flag.Int(name, value, ""), info: info, helptext: helptext}
-	flags[name] = fu
-	return fu
+	return addFlags(&flagUsage{name: name, Int: flag.Int(name, value, ""), IntDefault: value, info: info, helptext: helptext})
 }
 
 func flagString(name, value, info string, helptext ...string) *flagUsage {
-	fu := &flagUsage{name: name, Str: flag.String(name, value, ""), info: info, helptext: helptext}
-	flags[name] = fu
+	return addFlags(&flagUsage{name: name, Str: flag.String(name, value, ""), StrDefault: value, info: info, helptext: helptext})
+}
+
+func addFlags(fu *flagUsage) *flagUsage {
+	flags[fu.name] = fu
 	return fu
 }
 
-func checkServerModeArgErrorStr(flagArgs ...*flagUsage) {
+func checkServerModeArgs(flagArgs ...*flagUsage) {
 	for _, arg := range flagArgs {
-		printServerModeArgError(arg.name)
+		if !arg.IsDefault() {
+			printUsageError(fmt.Sprintf(`Invalid argument, "-%s" can only be used in client ("-c") mode.`, arg.name))
+		}
 	}
 }

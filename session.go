@@ -126,8 +126,10 @@ type serverParam struct {
 	showUI bool
 }
 
-var ipVer = ipAny
-var gIsExternalClient bool
+var (
+	ipVer             = ipAny
+	gIsExternalClient bool
+)
 
 type conn struct {
 	bw      uint64
@@ -145,9 +147,11 @@ type session struct {
 	tests     map[TestID]*test
 }
 
-var gSessions = make(map[string]*session)
-var gSessionKeys []string
-var gSessionLock sync.RWMutex
+var (
+	gSessions    = make(map[string]*session)
+	gSessionKeys []string
+	gSessionLock sync.RWMutex
+)
 
 func deleteKey(key string) {
 	i := 0

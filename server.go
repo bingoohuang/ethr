@@ -22,7 +22,7 @@ func finiServer() {
 }
 
 func showAcceptedIPVersion() {
-	var ipVerString = "ipv4, ipv6"
+	ipVerString := "ipv4, ipv6"
 	if ipVer == iPv4 {
 		ipVerString = "ipv4"
 	} else if ipVer == iPv6 {

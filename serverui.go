@@ -214,7 +214,7 @@ func (u *serverTui) emitLatencyResults(remote, proto string, avg, min, max, p50,
 func (u *serverTui) paint(seconds uint64) {
 	tm.Clear(tm.ColorDefault, tm.ColorDefault)
 	defer tm.Flush()
-	printCenterText(0, 0, u.w, "Ethr (Version: "+gVersion+")", tm.ColorBlack, tm.ColorWhite)
+	printCenterText(0, 0, u.w, "Ethr (Version: "+AppVersion+")", tm.ColorBlack, tm.ColorWhite)
 	printHLineText(u.resX, u.resY-1, u.resW, "Test Results")
 	printHLineText(u.statX, u.statY-1, u.statW, "Statistics")
 	printVLine(u.topVSplitX, u.topVSplitY, u.topVSplitH)
@@ -282,8 +282,10 @@ func (u *serverTui) paint(seconds uint64) {
 		tm.ColorDefault, tm.ColorDefault)
 }
 
-var gPrevNetStats netStat
-var gCurNetStats netStat
+var (
+	gPrevNetStats netStat
+	gCurNetStats  netStat
+)
 
 func (u *serverTui) emitStats(netStats netStat) {
 	gPrevNetStats = gCurNetStats
@@ -368,7 +370,7 @@ func (u *serverCli) printTestResults(s []string) {
 }
 
 func emitAggregateResults() {
-	var protoList = []Protocol{TCP, UDP, ICMP}
+	protoList := []Protocol{TCP, UDP, ICMP}
 	for _, proto := range protoList {
 		emitAggregate(proto)
 	}
@@ -378,11 +380,13 @@ func emitAggregate(proto Protocol) {
 	var str []string
 	agg, _ := gAggregateTestResults[proto]
 	if agg.cbw > 1 || agg.ccps > 1 || agg.cpps > 1 {
-		str = []string{"[SUM]", proto.String(),
+		str = []string{
+			"[SUM]", proto.String(),
 			bytesToRate(agg.bw),
 			cpsToString(agg.cps),
 			ppsToString(agg.pps),
-			""}
+			"",
+		}
 	}
 	agg.bw = 0
 	agg.cps = 0
@@ -435,7 +439,7 @@ func getTestResults(s *session, proto Protocol, seconds uint64) []string {
 	}
 
 	if bwTestOn || cpsTestOn || ppsTestOn || latTestOn {
-		var bwStr, cpsStr, ppsStr, latStr = "--  ", "--  ", "--  ", "--  "
+		bwStr, cpsStr, ppsStr, latStr := "--  ", "--  ", "--  ", "--  "
 		if bwTestOn {
 			bwStr = bytesToRate(bw)
 		}

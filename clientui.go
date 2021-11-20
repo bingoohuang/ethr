@@ -84,8 +84,10 @@ func initClientUI(title string) {
 	ui = cli
 }
 
-var gInterval uint64
-var gNoConnectionStats bool
+var (
+	gInterval          uint64
+	gNoConnectionStats bool
+)
 
 func printBwTestDivider(p Protocol) {
 	if p == TCP {
@@ -143,8 +145,10 @@ func printTestResult(t *test, seconds uint64) {
 				printBwTestDivider(t.testID.Protocol)
 			}
 		}
-		logResults([]string{t.session.remoteIP, t.testID.Protocol.String(),
-			bytesToRate(cbw), "", ppsToString(cpps), ""})
+		logResults([]string{
+			t.session.remoteIP, t.testID.Protocol.String(),
+			bytesToRate(cbw), "", ppsToString(cpps), "",
+		})
 	} else if t.testID.Type == Cps {
 		if gInterval == 0 {
 			ui.printMsg("- - - - - - - - - - - - - - - - - - ")
@@ -153,8 +157,10 @@ func printTestResult(t *test, seconds uint64) {
 		cps := atomic.SwapUint64(&t.testResult.cps, 0)
 		ui.printMsg("  %-5s    %03d-%03d sec   %7s",
 			t.testID.Protocol, gInterval, gInterval+1, cpsToString(cps))
-		logResults([]string{t.session.remoteIP, t.testID.Protocol.String(),
-			"", cpsToString(cps), "", ""})
+		logResults([]string{
+			t.session.remoteIP, t.testID.Protocol.String(),
+			"", cpsToString(cps), "", "",
+		})
 	} else if t.testID.Type == Pps {
 		if gInterval == 0 {
 			ui.printMsg("- - - - - - - - - - - - - - - - - - - - - - -")
@@ -164,8 +170,10 @@ func printTestResult(t *test, seconds uint64) {
 		pps := atomic.SwapUint64(&t.testResult.pps, 0)
 		ui.printMsg("  %-5s    %03d-%03d sec   %7s   %7s",
 			t.testID.Protocol.String(), gInterval, gInterval+1, bytesToRate(bw), ppsToString(pps))
-		logResults([]string{t.session.remoteIP, t.testID.Protocol.String(),
-			bytesToRate(bw), "", ppsToString(pps), ""})
+		logResults([]string{
+			t.session.remoteIP, t.testID.Protocol.String(),
+			bytesToRate(bw), "", ppsToString(pps), "",
+		})
 	} else if t.testID.Type == MyTraceRoute {
 		if gCurHops > 0 {
 			ui.printMsg("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
@@ -191,7 +199,7 @@ func printTestResult(t *test, seconds uint64) {
 }
 
 func (u *clientUI) emitTestResult(s *session, proto Protocol, seconds uint64) {
-	var testList = []TestType{Bandwidth, Cps, Pps, TraceRoute, MyTraceRoute}
+	testList := []TestType{Bandwidth, Cps, Pps, TraceRoute, MyTraceRoute}
 
 	for _, testType := range testList {
 		if t, found := s.tests[TestID{Protocol: proto, Type: testType}]; found && t.isActive {

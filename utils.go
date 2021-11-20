@@ -17,12 +17,14 @@ import (
 	"unicode/utf8"
 )
 
-var gLocalIP = ""
-var gPort = uint16(12321)
-var gPortStr = ""
-var gClientPort = uint16(0)
-var gTOS = uint8(0)
-var gTTL = uint8(0)
+var (
+	gLocalIP    = ""
+	gPort       = uint16(12321)
+	gPortStr    = ""
+	gClientPort = uint16(0)
+	gTOS        = uint8(0)
+	gTTL        = uint8(0)
+)
 
 const (
 	KILO = 1000

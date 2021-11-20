@@ -58,14 +58,16 @@ type logTestResults struct {
 	AverageLatency       string
 }
 
-var loggingActive = false
-var logChan = make(chan string, 64)
+var (
+	loggingActive = false
+	logChan       = make(chan string, 64)
+)
 
 func logInit(fileName string) {
 	if fileName == "" {
 		return
 	}
-	logFile, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0666)
+	logFile, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o666)
 	if err != nil {
 		fmt.Printf("Unable to open the log file %s, Error: %v\n", fileName, err)
 		return

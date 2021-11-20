@@ -11,16 +11,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
+	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
-
-	"net"
-	"os"
-	"os/signal"
-
 	"syscall"
 	"time"
 
@@ -603,9 +601,11 @@ type hopData struct {
 	fullName string
 }
 
-var gMaxHops = 30
-var gCurHops int
-var gHop []hopData
+var (
+	gMaxHops = 30
+	gCurHops int
+	gHop     []hopData
+)
 
 func (t *test) icmpRunPing(prefix string) (time.Duration, error) {
 	dstIPAddr, _, err := lookupIP(t.dialAddr)
