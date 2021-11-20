@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-type ethrNetStat struct {
-	netDevStats []ethrNetDevStat
-	tcpStats    ethrTCPStat
+type netStat struct {
+	netDevStats []netDevStat
+	tcpStats    TCPStat
 }
 
-type ethrNetDevStat struct {
+type netDevStat struct {
 	interfaceName string
 	rxBytes       uint64
 	txBytes       uint64
@@ -23,72 +23,45 @@ type ethrNetDevStat struct {
 	txPkts        uint64
 }
 
-type ethrTCPStat struct {
+type TCPStat struct {
 	segRetrans uint64
 }
 
-func getNetworkStats() ethrNetStat {
-	stats := &ethrNetStat{}
+func getNetworkStats() netStat {
+	stats := &netStat{}
 	getNetDevStats(stats)
-	/*
-		devStats, err := osStats.GetNetDevStats()
-		if err != nil {
-			return stats.EthrNetStats{}, errors.Wrap(err, "getNetworkStats: could not get net device stats")
-		}
-	*/
+
 	sort.SliceStable(stats.netDevStats, func(i, j int) bool {
 		return stats.netDevStats[i].interfaceName < stats.netDevStats[j].interfaceName
 	})
 	getTCPStats(stats)
 
-	/*
-		tcpStats, err := osStats.GetTCPStats()
-		if err != nil {
-			return stats.EthrNetStats{}, errors.Wrap(err, "getNetworkStats: could not get net TCP stats")
-		}
-
-		return stats.EthrNetStats{NetDevStats: devStats, TCPStats: tcpStats}, nil
-	*/
 	return *stats
 }
 
-func getNetDevStatDiff(curStats ethrNetDevStat, prevNetStats ethrNetStat, seconds uint64) ethrNetDevStat {
-	for _, prevStats := range prevNetStats.netDevStats {
-		if prevStats.interfaceName != curStats.interfaceName {
-			continue
-		}
-
-		if curStats.rxBytes >= prevStats.rxBytes {
-			curStats.rxBytes -= prevStats.rxBytes
-		} else {
-			curStats.rxBytes += (^uint64(0) - prevStats.rxBytes)
-		}
-
-		if curStats.txBytes >= prevStats.txBytes {
-			curStats.txBytes -= prevStats.txBytes
-		} else {
-			curStats.txBytes += (^uint64(0) - prevStats.txBytes)
-		}
-
-		if curStats.rxPkts >= prevStats.rxPkts {
-			curStats.rxPkts -= prevStats.rxPkts
-		} else {
-			curStats.rxPkts += (^uint64(0) - prevStats.rxPkts)
-		}
-
-		if curStats.txPkts >= prevStats.txPkts {
-			curStats.txPkts -= prevStats.txPkts
-		} else {
-			curStats.txPkts += (^uint64(0) - prevStats.txPkts)
-		}
-
-		break
+func adjust(cur, prev uint64) uint64 {
+	if cur >= prev {
+		return cur - prev
 	}
-	curStats.rxBytes /= seconds
-	curStats.txBytes /= seconds
-	curStats.rxPkts /= seconds
-	curStats.txPkts /= seconds
-	return curStats
+
+	return cur + ^uint64(0) - prev
+}
+
+func getNetDevStatDiff(cur netDevStat, prev netStat, seconds uint64) netDevStat {
+	for _, p := range prev.netDevStats {
+		if p.interfaceName == cur.interfaceName {
+			cur.rxBytes = adjust(cur.rxBytes, p.rxBytes)
+			cur.txBytes = adjust(cur.txBytes, p.txBytes)
+			cur.rxPkts = adjust(cur.rxPkts, p.rxPkts)
+			cur.txPkts = adjust(cur.txPkts, p.txPkts)
+			break
+		}
+	}
+	cur.rxBytes /= seconds
+	cur.txBytes /= seconds
+	cur.rxPkts /= seconds
+	cur.txPkts /= seconds
+	return cur
 }
 
 var statsEnabled bool
@@ -125,12 +98,7 @@ func stopStatsTimer() {
 	statsEnabled = false
 }
 
-var lastStatsTime time.Time = time.Now()
-
-func timeToNextTick() time.Duration {
-	nextTick := lastStatsTime.Add(time.Second)
-	return time.Until(nextTick)
-}
+var lastStatsTime = time.Now()
 
 func emitStats() {
 	d := time.Since(lastStatsTime)

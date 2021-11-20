@@ -6,10 +6,6 @@
 package main
 
 import (
-	//	"bytes"
-	//	"crypto/tls"
-	//	"crypto/x509"
-
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
@@ -21,15 +17,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	//	"io"
-	//	"io/ioutil"
 	"net"
-	//	"net/http"
 	"os"
 	"os/signal"
 
-	//	"sort"
-	//	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -37,8 +28,6 @@ import (
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
-
-var gIgnoreCert bool
 
 const (
 	done       = 0
@@ -58,8 +47,7 @@ func handleInterrupt(toStop chan<- int) {
 
 func runDurationTimer(d time.Duration, toStop chan int) {
 	go func() {
-		dSeconds := uint64(d.Seconds())
-		if dSeconds == 0 {
+		if dSeconds := uint64(d.Seconds()); dSeconds == 0 {
 			return
 		}
 		time.Sleep(d)
@@ -73,25 +61,20 @@ func initClient(title string) {
 	initClientUI(title)
 }
 
-func handshakeWithServer(test *ethrTest, conn net.Conn) (err error) {
-	ethrMsg := createSynMsg(test.testID, test.clientParam)
-	err = sendSessionMsg(conn, ethrMsg)
-	if err != nil {
+func (t *test) handshakeWithServer(conn net.Conn) error {
+	msg := createSynMsg(t.testID, t.clientParam)
+	if err := msg.send(conn); err != nil {
 		ui.printDbg("Failed to send SYN message to Ethr server. Error: %v", err)
-		return
+		return err
 	}
-	ethrMsg = recvSessionMsg(conn)
-	if ethrMsg.Type != EthrAck {
-		ui.printDbg("Failed to receive ACK message from Ethr server. Error: %v", err)
-		err = os.ErrInvalid
+	if m := recvSessionMsg(conn); m.Type != Ack {
+		ui.printDbg("Failed to receive ACK message from Ethr server. Error: %v", m)
+		return os.ErrInvalid
 	}
-	return
+	return nil
 }
 
-func getServerIPandPort(server string) (string, string, string, error) {
-	hostName := ""
-	hostIP := ""
-	port := ""
+func getServerIPPort(server string) (hostName, hostIP, port string, err error) {
 	u, err := url.Parse(server)
 	if err == nil && u.Hostname() != "" {
 		hostName = u.Hostname()
@@ -100,38 +83,38 @@ func getServerIPandPort(server string) (string, string, string, error) {
 		} else {
 			// Only implicitly derive port in External client mode.
 			if gIsExternalClient {
-				if u.Scheme == "http" {
+				switch u.Scheme {
+				case "http":
 					port = "80"
-				} else if u.Scheme == "https" {
+				case "https":
 					port = "443"
 				}
 			}
 		}
 	} else {
-		hostName, port, err = net.SplitHostPort(server)
-		if err != nil {
+		if hostName, port, err = net.SplitHostPort(server); err != nil {
 			hostName = server
 		}
 	}
-	_, hostIP, err = ethrLookupIP(hostName)
+	_, hostIP, err = lookupIP(hostName)
 	return hostName, hostIP, port, err
 }
 
-func runClient(testID EthrTestID, title string, clientParam EthrClientParam, server string) {
+func runClient(testID TestID, title string, clientParam clientParam, server string) {
 	initClient(title)
-	hostName, hostIP, port, err := getServerIPandPort(server)
+	hostName, hostIP, port, err := getServerIPPort(server)
 	if err != nil {
 		return
 	}
 	ip := net.ParseIP(hostIP)
-	if ip != nil {
-		if ip.To4() != nil {
-			gIPVersion = ethrIPv4
-		} else {
-			gIPVersion = ethrIPv6
-		}
-	} else {
+	if ip == nil {
 		return
+	}
+
+	if ip.To4() != nil {
+		ipVer = iPv4
+	} else {
+		ipVer = iPv6
 	}
 
 	if gIsExternalClient {
@@ -145,68 +128,71 @@ func runClient(testID EthrTestID, title string, clientParam EthrClientParam, ser
 			ui.printMsg("Hint: Use external mode (-x).")
 			return
 		}
-		port = gEthrPortStr
+		port = gPortStr
 	}
 	ui.printMsg("Using destination: %s, ip: %s, port: %s", hostName, hostIP, port)
-	test, err := newTest(hostIP, testID, clientParam)
+	t, err := newTest(hostIP, testID, clientParam)
 	if err != nil {
-		ui.printErr("Failed to create the new test.")
+		ui.printErr("Failed to create the new t.")
 		return
 	}
-	test.remoteAddr = server
-	test.remoteIP = hostIP
-	test.remotePort = port
+	t.remoteAddr = server
+	t.remoteIP = hostIP
+	t.remotePort = port
 	if testID.Protocol == ICMP {
-		test.dialAddr = hostIP
+		t.dialAddr = hostIP
 	} else {
-		test.dialAddr = fmt.Sprintf("[%s]:%s", hostIP, port)
+		t.dialAddr = fmt.Sprintf("[%s]:%s", hostIP, port)
 	}
-	runTest(test)
+	t.runTest()
 }
 
-func runTest(test *ethrTest) {
+func (t *test) runTest() {
 	toStop := make(chan int, 16)
 	startStatsTimer()
-	gap := test.clientParam.Gap
-	duration := test.clientParam.Duration
+	gap := t.clientParam.Gap
+	duration := t.clientParam.Duration
 	runDurationTimer(duration, toStop)
-	test.isActive = true
-	if test.testID.Protocol == TCP {
-		if test.testID.Type == Bandwidth {
-			tcpRunBandwidthTest(test, toStop)
-		} else if test.testID.Type == Latency {
-			go runTCPLatencyTest(test, gap, toStop)
-		} else if test.testID.Type == Cps {
-			go tcpRunCpsTest(test)
-		} else if test.testID.Type == Ping {
-			go clientRunPingTest(test, gap, test.clientParam.WarmupCount)
-		} else if test.testID.Type == TraceRoute {
-			VerifyPermissionForTest(test.testID)
-			go tcpRunTraceRoute(test, gap, toStop)
-		} else if test.testID.Type == MyTraceRoute {
-			VerifyPermissionForTest(test.testID)
-			go tcpRunMyTraceRoute(test, gap, toStop)
+	t.isActive = true
+	switch t.testID.Protocol {
+	case TCP:
+		switch t.testID.Type {
+		case Bandwidth:
+			t.tcpRunBandwidthTest(toStop)
+		case Latency:
+			go t.runTCPLatencyTest(gap, toStop)
+		case Cps:
+			go t.tcpRunCpsTest()
+		case Ping:
+			go t.clientRunPingTest(gap, t.clientParam.WarmupCount)
+		case TraceRoute:
+			VerifyPermissionForTest(t.testID)
+			go t.tcpRunTraceRoute(gap, toStop)
+		case MyTraceRoute:
+			VerifyPermissionForTest(t.testID)
+			go t.tcpRunMyTraceRoute(gap, toStop)
 		}
-	} else if test.testID.Protocol == UDP {
-		if test.testID.Type == Bandwidth ||
-			test.testID.Type == Pps {
-			runUDPBandwidthAndPpsTest(test)
+	case UDP:
+		switch t.testID.Type {
+		case Bandwidth, Pps:
+			t.runUDPBandwidthAndPpsTest()
 		}
-	} else if test.testID.Protocol == ICMP {
-		VerifyPermissionForTest(test.testID)
-		if test.testID.Type == Ping {
-			go clientRunPingTest(test, gap, test.clientParam.WarmupCount)
-		} else if test.testID.Type == TraceRoute {
-			go icmpRunTraceRoute(test, gap, toStop)
-		} else if test.testID.Type == MyTraceRoute {
-			go icmpRunMyTraceRoute(test, gap, toStop)
+	case ICMP:
+		VerifyPermissionForTest(t.testID)
+		switch t.testID.Type {
+		case Ping:
+			go t.clientRunPingTest(gap, t.clientParam.WarmupCount)
+		case TraceRoute:
+			go t.icmpRunTraceRoute(gap, toStop)
+		case MyTraceRoute:
+			go t.icmpRunMyTraceRoute(gap, toStop)
 		}
 	}
 	handleInterrupt(toStop)
 	reason := <-toStop
 	stopStatsTimer()
-	close(test.done)
-	if test.testID.Type == Ping {
+	close(t.done)
+	if t.testID.Type == Ping {
 		time.Sleep(2 * time.Second)
 	}
 	switch reason {
@@ -214,7 +200,7 @@ func runTest(test *ethrTest) {
 		ui.printMsg("Ethr done, measurement complete.")
 	case timeout:
 		ui.printMsg("Ethr done, duration: " + duration.String() + ".")
-		ui.printMsg("Hint: Use -d parameter to change duration of the test.")
+		ui.printMsg("Hint: Use -d parameter to change duration of the t.")
 	case interrupt:
 		ui.printMsg("Ethr done, received interrupt signal.")
 	case disconnect:
@@ -223,120 +209,113 @@ func runTest(test *ethrTest) {
 	return
 }
 
-func tcpRunBandwidthTest(test *ethrTest, toStop chan int) {
+func (t *test) tcpRunBandwidthTest(toStop chan int) {
 	var wg sync.WaitGroup
-	tcpRunBanwidthTestThreads(test, &wg)
+	t.tcpRunBandwidthTestThreads(&wg)
 	go func(wg *sync.WaitGroup) {
 		wg.Wait()
 		toStop <- disconnect
 	}(&wg)
 }
 
-func tcpRunBanwidthTestThreads(test *ethrTest, wg *sync.WaitGroup) {
-	for th := uint32(0); th < test.clientParam.NumThreads; th++ {
-		conn, err := ethrDialInc(TCP, test.dialAddr, uint16(th))
+func (t *test) tcpRunBandwidthTestThreads(wg *sync.WaitGroup) {
+	for th := uint32(0); th < t.clientParam.NumThreads; th++ {
+		conn, err := TCP.dialInc(t.dialAddr, uint16(th))
 		if err != nil {
 			ui.printErr("Error dialing connection: %v", err)
 			continue
 		}
-		err = handshakeWithServer(test, conn)
-		if err != nil {
+		if err := t.handshakeWithServer(conn); err != nil {
 			ui.printErr("Failed in handshake with the server. Error: %v", err)
 			conn.Close()
 			continue
 		}
 		wg.Add(1)
-		go runTCPBandwidthTestHandler(test, conn, wg)
+		go t.runTCPBandwidthTestHandler(conn, wg)
 	}
 }
 
-func runTCPBandwidthTestHandler(test *ethrTest, conn net.Conn, wg *sync.WaitGroup) {
+func (t *test) runTCPBandwidthTestHandler(conn net.Conn, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer conn.Close()
-	ec := test.newConn(conn)
+	ec := t.newConn(conn)
 	rserver, rport, _ := net.SplitHostPort(conn.RemoteAddr().String())
 	lserver, lport, _ := net.SplitHostPort(conn.LocalAddr().String())
 	ui.printMsg("[%3d] local %s port %s connected to %s port %s",
 		ec.fd, lserver, lport, rserver, rport)
-	size := test.clientParam.BufferSize
+	size := t.clientParam.BufferSize
 	buff := make([]byte, size)
 	for i := uint32(0); i < size; i++ {
 		buff[i] = byte(i)
 	}
-	bufferLen := len(buff)
-	totalBytesToSend := test.clientParam.BwRate
+	totalBytesToSend := t.clientParam.BwRate
 	sentBytes := uint64(0)
-	start, waitTime, bytesToSend := beginThrottle(totalBytesToSend, bufferLen)
-ExitForLoop:
+	start, waitTime, bytesToSend := beginThrottle(totalBytesToSend, len(buff))
 	for {
 		select {
-		case <-test.done:
-			break ExitForLoop
+		case <-t.done:
+			return
 		default:
 			n := 0
 			var err error = nil
-			if test.clientParam.Reverse {
+			if t.clientParam.Reverse {
 				n, err = conn.Read(buff)
 			} else {
 				n, err = conn.Write(buff[:bytesToSend])
 			}
 			if err != nil {
 				ui.printDbg("Error sending/receiving data on a connection for bandwidth test: %v", err)
-				break ExitForLoop
+				return
 			}
 			atomic.AddUint64(&ec.bw, uint64(n))
-			atomic.AddUint64(&test.testResult.bw, uint64(n))
-			if !test.clientParam.Reverse {
+			atomic.AddUint64(&t.testResult.bw, uint64(n))
+			if !t.clientParam.Reverse {
 				sentBytes += uint64(n)
-				start, waitTime, sentBytes, bytesToSend = enforceThrottle(start, waitTime, totalBytesToSend, sentBytes, bufferLen)
+				start, waitTime, sentBytes, bytesToSend = enforceThrottle(
+					start, waitTime, totalBytesToSend, sentBytes, len(buff))
 			}
 		}
 	}
 }
 
-func runTCPLatencyTest(test *ethrTest, g time.Duration, toStop chan int) {
-	ui.printMsg("Running latency test: %v, %v", test.clientParam.RttCount, test.clientParam.BufferSize)
-	conn, err := ethrDial(TCP, test.dialAddr)
+func (t *test) runTCPLatencyTest(g time.Duration, toStop chan int) {
+	ui.printMsg("Running latency test: %v, %v", t.clientParam.RttCount, t.clientParam.BufferSize)
+	conn, err := TCP.dial(t.dialAddr)
 	if err != nil {
 		ui.printErr("Error dialing the latency connection: %v", err)
 		return
 	}
 	defer conn.Close()
-	err = handshakeWithServer(test, conn)
-	if err != nil {
+	if err := t.handshakeWithServer(conn); err != nil {
 		ui.printErr("Failed in handshake with the server. Error: %v", err)
 		return
 	}
 	ui.emitLatencyHdr()
-	buffSize := test.clientParam.BufferSize
+	buffSize := t.clientParam.BufferSize
 	buff := make([]byte, buffSize)
 	for i := uint32(0); i < buffSize; i++ {
 		buff[i] = byte(i)
 	}
 	blen := len(buff)
-	rttCount := test.clientParam.RttCount
+	rttCount := t.clientParam.RttCount
 	latencyNumbers := make([]time.Duration, rttCount)
-ExitForLoop:
 	for {
-	ExitSelect:
 		select {
-		case <-test.done:
-			break ExitForLoop
+		case <-t.done:
+			return
 		default:
 			t0 := time.Now()
 			for i := uint32(0); i < rttCount; i++ {
 				s1 := time.Now()
-				n, err := conn.Write(buff)
-				if err != nil || n < blen {
-					ui.printDbg("Error sending/receiving data on a connection for latency test: %v", err)
+				if n, err := conn.Write(buff); err != nil || n < blen {
+					ui.printDbg("Error sending/receiving data on a connection for latency t: %v", err)
 					toStop <- disconnect
-					break ExitSelect
+					continue
 				}
-				_, err = io.ReadFull(conn, buff)
-				if err != nil {
-					ui.printDbg("Error sending/receiving data on a connection for latency test: %v", err)
+				if _, err := io.ReadFull(conn, buff); err != nil {
+					ui.printDbg("Error sending/receiving data on a connection for latency t: %v", err)
 					toStop <- disconnect
-					break ExitSelect
+					continue
 				}
 				e2 := time.Since(s1)
 				latencyNumbers[i] = e2
@@ -344,16 +323,15 @@ ExitForLoop:
 			// TODO temp code, fix it better, this is to allow server to do
 			// server side latency measurements as well.
 			_, _ = conn.Write(buff)
-			calcAndPrintLatency(test, rttCount, latencyNumbers)
-			t1 := time.Since(t0)
-			if t1 < g {
+			t.calcAndPrintLatency(rttCount, latencyNumbers)
+			if t1 := time.Since(t0); t1 < g {
 				time.Sleep(g - t1)
 			}
 		}
 	}
 }
 
-func calcAndPrintLatency(test *ethrTest, rttCount uint32, latencyNumbers []time.Duration) {
+func (t *test) calcAndPrintLatency(rttCount uint32, latencyNumbers []time.Duration) {
 	sum := int64(0)
 	for _, d := range latencyNumbers {
 		sum += d.Nanoseconds()
@@ -381,30 +359,27 @@ func calcAndPrintLatency(test *ethrTest, rttCount uint32, latencyNumbers []time.
 	p999 := latencyNumbers[uint64(((float64(rttCountFixed)*99.9)/100)-1)]
 	p9999 := latencyNumbers[uint64(((float64(rttCountFixed)*99.99)/100)-1)]
 	ui.emitLatencyResults(
-		test.session.remoteIP,
-		protoToString(test.testID.Protocol),
+		t.session.remoteIP,
+		t.testID.Protocol.String(),
 		avg, min, max, p50, p90, p95, p99, p999, p9999)
 }
 
-func tcpRunCpsTest(test *ethrTest) {
-	for th := uint32(0); th < test.clientParam.NumThreads; th++ {
+func (t *test) tcpRunCpsTest() {
+	for th := uint32(0); th < t.clientParam.NumThreads; th++ {
 		go func(th uint32) {
-		ExitForLoop:
 			for {
 				select {
-				case <-test.done:
-					break ExitForLoop
+				case <-t.done:
+					return
 				default:
-					conn, err := ethrDialAll(TCP, test.dialAddr)
-					if err == nil {
-						atomic.AddUint64(&test.testResult.cps, 1)
-						tcpconn, ok := conn.(*net.TCPConn)
-						if ok {
-							tcpconn.SetLinger(0)
+					if conn, err := TCP.dialAll(t.dialAddr); err == nil {
+						atomic.AddUint64(&t.testResult.cps, 1)
+						if c, ok := conn.(*net.TCPConn); ok {
+							c.SetLinger(0)
 						}
 						conn.Close()
 					} else {
-						ui.printDbg("Unable to dial TCP connection to %s, error: %v", test.dialAddr, err)
+						ui.printDbg("Unable to dial TCP connection to %s, error: %v", t.dialAddr, err)
 					}
 				}
 			}
@@ -412,29 +387,27 @@ func tcpRunCpsTest(test *ethrTest) {
 	}
 }
 
-func clientRunPingTest(test *ethrTest, g time.Duration, warmupCount uint32) {
-	// TODO: Override NumThreads for now, fix it later to support parallel
-	// threads.
-	test.clientParam.NumThreads = 1
-	for th := uint32(0); th < test.clientParam.NumThreads; th++ {
+func (t *test) clientRunPingTest(g time.Duration, warmupCount uint32) {
+	// TODO: Override NumThreads for now, fix it later to support parallel threads.
+	t.clientParam.NumThreads = 1
+	for th := uint32(0); th < t.clientParam.NumThreads; th++ {
 		go func() {
 			var sent, rcvd, lost uint32
 			warmupText := "[warmup] "
 			latencyNumbers := make([]time.Duration, 0)
-		ExitForLoop:
 			for {
 				select {
-				case <-test.done:
-					printConnectionLatencyResults(test.dialAddr, test, sent, rcvd, lost, latencyNumbers)
-					break ExitForLoop
+				case <-t.done:
+					t.printConnectionLatencyResults(t.dialAddr, sent, rcvd, lost, latencyNumbers)
+					return
 				default:
 					t0 := time.Now()
 					if warmupCount > 0 {
 						warmupCount--
-						clientRunPing(test, warmupText)
+						t.clientRunPing(warmupText)
 					} else {
 						sent++
-						latency, err := clientRunPing(test, "")
+						latency, err := t.clientRunPing("")
 						if err == nil {
 							rcvd++
 							latencyNumbers = append(latencyNumbers, latency)
@@ -443,12 +416,11 @@ func clientRunPingTest(test *ethrTest, g time.Duration, warmupCount uint32) {
 						}
 					}
 					if rcvd >= 1000 {
-						printConnectionLatencyResults(test.dialAddr, test, sent, rcvd, lost, latencyNumbers)
+						t.printConnectionLatencyResults(t.dialAddr, sent, rcvd, lost, latencyNumbers)
 						latencyNumbers = make([]time.Duration, 0)
 						sent, rcvd, lost = 0, 0, 0
 					}
-					t1 := time.Since(t0)
-					if t1 < g {
+					if t1 := time.Since(t0); t1 < g {
 						time.Sleep(g - t1)
 					}
 				}
@@ -457,19 +429,18 @@ func clientRunPingTest(test *ethrTest, g time.Duration, warmupCount uint32) {
 	}
 }
 
-func clientRunPing(test *ethrTest, prefix string) (time.Duration, error) {
-	if test.testID.Protocol == TCP {
-		return tcpRunPing(test, prefix)
-	} else {
-		return icmpRunPing(test, prefix)
+func (t *test) clientRunPing(prefix string) (time.Duration, error) {
+	if t.testID.Protocol == TCP {
+		return t.tcpRunPing(prefix)
 	}
+	return t.icmpRunPing(prefix)
 }
 
-func tcpRunPing(test *ethrTest, prefix string) (timeTaken time.Duration, err error) {
+func (t *test) tcpRunPing(prefix string) (timeTaken time.Duration, err error) {
 	t0 := time.Now()
-	conn, err := ethrDial(TCP, test.dialAddr)
+	conn, err := TCP.dial(t.dialAddr)
 	if err != nil {
-		ui.printMsg("[tcp] %sConnection to %s: Timed out (%v)", prefix, test.dialAddr, err)
+		ui.printMsg("[tcp] %sConnection to %s: Timed out (%v)", prefix, t.dialAddr, err)
 		return
 	}
 	timeTaken = time.Since(t0)
@@ -485,30 +456,30 @@ func tcpRunPing(test *ethrTest, prefix string) (timeTaken time.Duration, err err
 	return
 }
 
-func printConnectionLatencyResults(server string, test *ethrTest, sent, rcvd, lost uint32, latencyNumbers []time.Duration) {
+func (t *test) printConnectionLatencyResults(server string, sent, rcvd, lost uint32, latencyNumbers []time.Duration) {
 	fmt.Println("-----------------------------------------------------------------------------------------")
 	ui.printMsg("TCP connect statistics for %s:", server)
 	ui.printMsg("  Sent = %d, Received = %d, Lost = %d", sent, rcvd, lost)
 	if rcvd > 0 {
 		ui.emitLatencyHdr()
-		calcAndPrintLatency(test, rcvd, latencyNumbers)
+		t.calcAndPrintLatency(rcvd, latencyNumbers)
 		fmt.Println("-----------------------------------------------------------------------------------------")
 	}
 }
 
-func tcpRunTraceRoute(test *ethrTest, gap time.Duration, toStop chan int) {
-	tcpRunTraceRouteInternal(test, gap, toStop, false)
+func (t *test) tcpRunTraceRoute(gap time.Duration, toStop chan int) {
+	t.tcpRunTraceRouteInternal(gap, toStop, false)
 }
 
-func tcpRunMyTraceRoute(test *ethrTest, gap time.Duration, toStop chan int) {
-	tcpRunTraceRouteInternal(test, gap, toStop, true)
+func (t *test) tcpRunMyTraceRoute(gap time.Duration, toStop chan int) {
+	t.tcpRunTraceRouteInternal(gap, toStop, true)
 }
 
-func tcpRunTraceRouteInternal(test *ethrTest, gap time.Duration, toStop chan int, mtrMode bool) {
-	gHop = make([]ethrHopData, gMaxHops)
-	err := tcpDiscoverHops(test, mtrMode)
+func (t *test) tcpRunTraceRouteInternal(gap time.Duration, toStop chan int, mtrMode bool) {
+	gHop = make([]hopData, gMaxHops)
+	err := t.tcpDiscoverHops(mtrMode)
 	if err != nil {
-		ui.printErr("Destination %s is not responding to TCP connection.", test.session.remoteIP)
+		ui.printErr("Destination %s is not responding to TCP connection.", t.session.remoteIP)
 		ui.printErr("Terminating tracing...")
 		toStop <- interrupt
 		return
@@ -519,23 +490,20 @@ func tcpRunTraceRouteInternal(test *ethrTest, gap time.Duration, toStop chan int
 	}
 	for i := 0; i < gCurHops; i++ {
 		if gHop[i].addr != "" {
-			go tcpProbeHop(test, gap, i)
+			go t.tcpProbeHop(gap, i)
 		}
 	}
 }
 
-func tcpProbeHop(test *ethrTest, gap time.Duration, hop int) {
+func (t *test) tcpProbeHop(gap time.Duration, hop int) {
 	seq := 0
-ExitForLoop:
 	for {
 		select {
-		case <-test.done:
-			break ExitForLoop
+		case <-t.done:
+			return
 		default:
 			t0 := time.Now()
-			err, _ := tcpProbe(test, hop+1, gHop[hop].addr, &gHop[hop])
-			if err == nil {
-			}
+			_, _ = t.tcpProbe(hop+1, gHop[hop].addr, &gHop[hop])
 			seq++
 			t1 := time.Since(t0)
 			if t1 < gap {
@@ -545,11 +513,11 @@ ExitForLoop:
 	}
 }
 
-func tcpDiscoverHops(test *ethrTest, mtrMode bool) error {
-	ui.printMsg("Tracing route to %s over %d hops:", test.session.remoteIP, gMaxHops)
+func (t *test) tcpDiscoverHops(mtrMode bool) error {
+	ui.printMsg("Tracing route to %s over %d hops:", t.session.remoteIP, gMaxHops)
 	for i := 0; i < gMaxHops; i++ {
-		var hopData ethrHopData
-		err, isLast := tcpProbe(test, i+1, "", &hopData)
+		var hopData hopData
+		err, isLast := t.tcpProbe(i+1, "", &hopData)
 		if err == nil {
 			hopData.name, hopData.fullName = lookupHopName(hopData.addr)
 		}
@@ -571,9 +539,9 @@ func tcpDiscoverHops(test *ethrTest, mtrMode bool) error {
 	return os.ErrNotExist
 }
 
-func tcpProbe(test *ethrTest, hop int, hopIP string, hopData *ethrHopData) (error, bool) {
+func (t *test) tcpProbe(hop int, hopIP string, hopData *hopData) (error, bool) {
 	isLast := false
-	c, err := IcmpNewConn(test.remoteIP)
+	c, err := IcmpNewConn(t.remoteIP)
 	if err != nil {
 		ui.printErr("Failed to create ICMP connection. Error: %v", err)
 		return err, isLast
@@ -586,7 +554,7 @@ func tcpProbe(test *ethrTest, hop int, hopIP string, hopData *ethrHopData) (erro
 	localPortNum += uint16(hop)
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint16(b[0:], localPortNum)
-	remotePortNum, err := strconv.ParseUint(test.remotePort, 10, 16)
+	remotePortNum, err := strconv.ParseUint(t.remotePort, 10, 16)
 	binary.BigEndian.PutUint16(b[2:], uint16(remotePortNum))
 	peerAddrChan := make(chan string)
 	endTimeChan := make(chan time.Time)
@@ -596,7 +564,7 @@ func tcpProbe(test *ethrTest, hop int, hopIP string, hopData *ethrHopData) (erro
 		peerAddrChan <- peerAddr
 	}()
 	startTime := time.Now()
-	conn, err := ethrDialEx(TCP, test.dialAddr, gLocalIP, localPortNum, hop, int(gTOS))
+	conn, err := TCP.dialEx(t.dialAddr, gLocalIP, localPortNum, hop, int(gTOS))
 	if err != nil {
 		ui.printDbg("Failed to Dial the connection. Error: %v", err)
 	} else {
@@ -607,7 +575,7 @@ func tcpProbe(test *ethrTest, hop int, hopIP string, hopData *ethrHopData) (erro
 	endTime := time.Now()
 	if err == nil {
 		isLast = true
-		peerAddr = test.remoteIP
+		peerAddr = t.remoteIP
 	} else {
 		endTime = <-endTimeChan
 		peerAddr = <-peerAddrChan
@@ -622,7 +590,7 @@ func tcpProbe(test *ethrTest, hop int, hopIP string, hopData *ethrHopData) (erro
 	return nil, isLast
 }
 
-type ethrHopData struct {
+type hopData struct {
 	addr     string
 	sent     uint32
 	rcvd     uint32
@@ -635,50 +603,49 @@ type ethrHopData struct {
 	fullName string
 }
 
-var gMaxHops int = 30
+var gMaxHops = 30
 var gCurHops int
-var gHop []ethrHopData
+var gHop []hopData
 
-func icmpRunPing(test *ethrTest, prefix string) (time.Duration, error) {
-	dstIPAddr, _, err := ethrLookupIP(test.dialAddr)
+func (t *test) icmpRunPing(prefix string) (time.Duration, error) {
+	dstIPAddr, _, err := lookupIP(t.dialAddr)
 	if err != nil {
 		return time.Second, err
 	}
 
-	var hopData ethrHopData
-	err, isLast := icmpProbe(test, dstIPAddr, time.Second, "", &hopData, 254, 255)
+	var hopData hopData
+	err, isLast := t.icmpProbe(dstIPAddr, time.Second, "", &hopData, 254, 255)
 	if err != nil {
-		ui.printMsg("[icmp] %sPing to %s: %v", prefix, test.dialAddr, err)
+		ui.printMsg("[icmp] %sPing to %s: %v", prefix, t.dialAddr, err)
 		return time.Second, err
 	}
 	if !isLast {
 		ui.printMsg("[icmp] %sPing to %s: %s",
-			prefix, test.dialAddr, "Non-EchoReply Received.")
+			prefix, t.dialAddr, "Non-EchoReply Received.")
 		return time.Second, os.ErrNotExist
 	}
 	ui.printMsg("[icmp] %sPing to %s: %s",
-		prefix, test.dialAddr, durationToString(hopData.last))
+		prefix, t.dialAddr, durationToString(hopData.last))
 	return hopData.last, nil
 }
 
-func icmpRunTraceRoute(test *ethrTest, gap time.Duration, toStop chan int) {
-	icmpRunTraceRouteInternal(test, gap, toStop, false)
+func (t *test) icmpRunTraceRoute(gap time.Duration, toStop chan int) {
+	t.icmpRunTraceRouteInternal(gap, toStop, false)
 }
 
-func icmpRunMyTraceRoute(test *ethrTest, gap time.Duration, toStop chan int) {
-	icmpRunTraceRouteInternal(test, gap, toStop, true)
+func (t *test) icmpRunMyTraceRoute(gap time.Duration, toStop chan int) {
+	t.icmpRunTraceRouteInternal(gap, toStop, true)
 }
 
-func icmpRunTraceRouteInternal(test *ethrTest, gap time.Duration, toStop chan int, mtrMode bool) {
-	gHop = make([]ethrHopData, gMaxHops)
-	dstIPAddr, _, err := ethrLookupIP(test.session.remoteIP)
+func (t *test) icmpRunTraceRouteInternal(gap time.Duration, toStop chan int, mtrMode bool) {
+	gHop = make([]hopData, gMaxHops)
+	dstIPAddr, _, err := lookupIP(t.session.remoteIP)
 	if err != nil {
 		toStop <- interrupt
 		return
 	}
-	err = icmpDiscoverHops(test, dstIPAddr, mtrMode)
-	if err != nil {
-		ui.printErr("Destination %s is not responding to ICMP Echo.", test.session.remoteIP)
+	if err = t.icmpDiscoverHops(dstIPAddr, mtrMode); err != nil {
+		ui.printErr("Destination %s is not responding to ICMP Echo.", t.session.remoteIP)
 		ui.printErr("Terminating tracing...")
 		toStop <- interrupt
 		return
@@ -689,19 +656,19 @@ func icmpRunTraceRouteInternal(test *ethrTest, gap time.Duration, toStop chan in
 	}
 	for i := 0; i < gCurHops; i++ {
 		if gHop[i].addr != "" {
-			go icmpProbeHop(test, gap, i, dstIPAddr)
+			go icmpProbeHop(t, gap, i, dstIPAddr)
 		}
 	}
 }
 
-func copyInitialHopData(hop int, hopData ethrHopData) {
+func copyInitialHopData(hop int, hopData hopData) {
 	gHop[hop].addr = hopData.addr
 	gHop[hop].best = hopData.last
 	gHop[hop].name = hopData.name
 	gHop[hop].fullName = hopData.fullName
 }
 
-func genHopData(hopData *ethrHopData, peerAddr string, elapsed time.Duration) {
+func genHopData(hopData *hopData, peerAddr string, elapsed time.Duration) {
 	hopData.addr = peerAddr
 	hopData.last = elapsed
 	if hopData.best > elapsed {
@@ -733,15 +700,15 @@ func lookupHopName(addr string) (string, string) {
 	return tname, name
 }
 
-func icmpDiscoverHops(test *ethrTest, dstIPAddr net.IPAddr, mtrMode bool) error {
-	if test.session.remoteIP == dstIPAddr.String() {
-		ui.printMsg("Tracing route to %s over %d hops:", test.session.remoteIP, gMaxHops)
+func (t *test) icmpDiscoverHops(dstIPAddr net.IPAddr, mtrMode bool) error {
+	if t.session.remoteIP == dstIPAddr.String() {
+		ui.printMsg("Tracing route to %s over %d hops:", t.session.remoteIP, gMaxHops)
 	} else {
-		ui.printMsg("Tracing route to %s (%s) over %d hops:", test.session.remoteIP, dstIPAddr.String(), gMaxHops)
+		ui.printMsg("Tracing route to %s (%s) over %d hops:", t.session.remoteIP, dstIPAddr.String(), gMaxHops)
 	}
 	for i := 0; i < gMaxHops; i++ {
-		var hopData ethrHopData
-		err, isLast := icmpProbe(test, dstIPAddr, time.Second*2, "", &hopData, i, 1)
+		var hopData hopData
+		err, isLast := t.icmpProbe(dstIPAddr, time.Second*2, "", &hopData, i, 1)
 		if err == nil {
 			hopData.name, hopData.fullName = lookupHopName(hopData.addr)
 		}
@@ -763,16 +730,15 @@ func icmpDiscoverHops(test *ethrTest, dstIPAddr net.IPAddr, mtrMode bool) error 
 	return os.ErrNotExist
 }
 
-func icmpProbeHop(test *ethrTest, gap time.Duration, hop int, dstIPAddr net.IPAddr) {
+func icmpProbeHop(t *test, gap time.Duration, hop int, dstIPAddr net.IPAddr) {
 	seq := 0
-ExitForLoop:
 	for {
 		select {
-		case <-test.done:
-			break ExitForLoop
+		case <-t.done:
+			return
 		default:
 			t0 := time.Now()
-			err, _ := icmpProbe(test, dstIPAddr, time.Second, gHop[hop].addr, &gHop[hop], hop, seq)
+			err, _ := t.icmpProbe(dstIPAddr, time.Second, gHop[hop].addr, &gHop[hop], hop, seq)
 			if err == nil {
 			}
 			seq++
@@ -784,11 +750,11 @@ ExitForLoop:
 	}
 }
 
-func icmpProbe(test *ethrTest, dstIPAddr net.IPAddr, icmpTimeout time.Duration, hopIP string, hopData *ethrHopData, hop, seq int) (error, bool) {
+func (t *test) icmpProbe(dstIPAddr net.IPAddr, icmpTimeout time.Duration, hopIP string, hopData *hopData, hop, seq int) (error, bool) {
 	isLast := false
 	echoMsg := fmt.Sprintf("Hello: Ethr - %v", hop)
 
-	c, err := IcmpNewConn(test.remoteIP)
+	c, err := IcmpNewConn(t.remoteIP)
 	if err != nil {
 		ui.printErr("Failed to create ICMP connection. Error: %v", err)
 		return err, isLast
@@ -812,15 +778,14 @@ func icmpProbe(test *ethrTest, dstIPAddr net.IPAddr, icmpTimeout time.Duration, 
 }
 
 func icmpSetTTL(c net.PacketConn, ttl int) error {
-	err := os.ErrInvalid
-	if gIPVersion == ethrIPv4 {
+	if ipVer == iPv4 {
 		cIPv4 := ipv4.NewPacketConn(c)
-		err = cIPv4.SetTTL(ttl)
-	} else if gIPVersion == ethrIPv6 {
+		return cIPv4.SetTTL(ttl)
+	} else if ipVer == iPv6 {
 		cIPv6 := ipv6.NewPacketConn(c)
-		err = cIPv6.SetHopLimit(ttl)
+		return cIPv6.SetHopLimit(ttl)
 	}
-	return err
+	return os.ErrInvalid
 }
 
 func icmpSetTOS(c net.PacketConn, tos int) error {
@@ -828,10 +793,10 @@ func icmpSetTOS(c net.PacketConn, tos int) error {
 		return nil
 	}
 	err := os.ErrInvalid
-	if gIPVersion == ethrIPv4 {
+	if ipVer == iPv4 {
 		cIPv4 := ipv4.NewPacketConn(c)
 		err = cIPv4.SetTOS(tos)
-	} else if gIPVersion == ethrIPv6 {
+	} else if ipVer == iPv6 {
 		cIPv6 := ipv6.NewPacketConn(c)
 		err = cIPv6.SetTrafficClass(tos)
 	}
@@ -862,7 +827,7 @@ func icmpSendMsg(c net.PacketConn, dstIPAddr net.IPAddr, hop, seq int, body stri
 			Data: []byte(body),
 		},
 	}
-	if gIPVersion == ethrIPv6 {
+	if ipVer == iPv6 {
 		wm.Type = ipv6.ICMPTypeEchoRequest
 	}
 	wb, err := wm.Marshal(nil)
@@ -878,7 +843,7 @@ func icmpSendMsg(c net.PacketConn, dstIPAddr net.IPAddr, hop, seq int, body stri
 	return start, wb, nil
 }
 
-func icmpRecvMsg(c net.PacketConn, proto EthrProtocol, timeout time.Duration, neededPeer string, neededSig []byte, neededIcmpBody []byte, neededIcmpSeq int) (string, bool, error) {
+func icmpRecvMsg(c net.PacketConn, proto Protocol, timeout time.Duration, neededPeer string, neededSig, neededIcmpBody []byte, neededIcmpSeq int) (string, bool, error) {
 	peerAddr := ""
 	isLast := false
 	err := c.SetDeadline(time.Now().Add(timeout))
@@ -913,22 +878,24 @@ func icmpRecvMsg(c net.PacketConn, proto EthrProtocol, timeout time.Duration, ne
 			ui.printDbg("Failed to parse ICMP message: %v", err)
 			continue
 		}
-		if icmpMsg.Type == ipv4.ICMPTypeTimeExceeded || icmpMsg.Type == ipv6.ICMPTypeTimeExceeded {
+		switch icmpMsg.Type {
+		case ipv4.ICMPTypeTimeExceeded, ipv6.ICMPTypeTimeExceeded:
 			body := icmpMsg.Body.(*icmp.TimeExceeded).Data
 			index := bytes.Index(body, neededSig[:4])
 			if index > 0 {
-				if proto == TCP {
+				switch proto {
+				case TCP:
 					ui.printDbg("Found correct ICMP error message. PeerAddr: %v", peerAddr)
 					return peerAddr, isLast, nil
-				} else if proto == ICMP {
+				case ICMP:
 					if index < 4 {
 						ui.printDbg("Incorrect length of ICMP message.")
 						continue
 					}
-					innerIcmpMsg, _ := icmp.ParseMessage(IcmpProto(), body[index-4:])
-					switch innerIcmpMsg.Body.(type) {
+
+					switch msg, _ := icmp.ParseMessage(IcmpProto(), body[index-4:]); msg.Body.(type) {
 					case *icmp.Echo:
-						seq := innerIcmpMsg.Body.(*icmp.Echo).Seq
+						seq := msg.Body.(*icmp.Echo).Seq
 						if seq == neededIcmpSeq {
 							return peerAddr, isLast, nil
 						}
@@ -943,8 +910,7 @@ func icmpRecvMsg(c net.PacketConn, proto EthrProtocol, timeout time.Duration, ne
 		}
 
 		if proto == ICMP && (icmpMsg.Type == ipv4.ICMPTypeEchoReply || icmpMsg.Type == ipv6.ICMPTypeEchoReply) {
-			echo := icmpMsg.Body.(*icmp.Echo)
-			ethrUnused(echo)
+			_ = icmpMsg.Body.(*icmp.Echo)
 			b, _ := icmpMsg.Body.Marshal(1)
 			if string(b[4:]) != string(neededIcmpBody) {
 				continue
@@ -955,31 +921,30 @@ func icmpRecvMsg(c net.PacketConn, proto EthrProtocol, timeout time.Duration, ne
 	}
 }
 
-func runUDPBandwidthAndPpsTest(test *ethrTest) {
-	for th := uint32(0); th < test.clientParam.NumThreads; th++ {
+func (t *test) runUDPBandwidthAndPpsTest() {
+	for th := uint32(0); th < t.clientParam.NumThreads; th++ {
 		go func(th uint32) {
-			size := test.clientParam.BufferSize
+			size := t.clientParam.BufferSize
 			buff := make([]byte, size)
-			conn, err := ethrDialInc(UDP, test.dialAddr, uint16(th))
+			conn, err := UDP.dialInc(t.dialAddr, uint16(th))
 			if err != nil {
 				ui.printDbg("Unable to dial UDP, error: %v", err)
 				return
 			}
 			defer conn.Close()
-			ec := test.newConn(conn)
+			ec := t.newConn(conn)
 			rserver, rport, _ := net.SplitHostPort(conn.RemoteAddr().String())
 			lserver, lport, _ := net.SplitHostPort(conn.LocalAddr().String())
 			ui.printMsg("[%3d] local %s port %s connected to %s port %s",
 				ec.fd, lserver, lport, rserver, rport)
 			bufferLen := len(buff)
-			totalBytesToSend := test.clientParam.BwRate
+			totalBytesToSend := t.clientParam.BwRate
 			sentBytes := uint64(0)
 			start, waitTime, bytesToSend := beginThrottle(totalBytesToSend, bufferLen)
-		ExitForLoop:
 			for {
 				select {
-				case <-test.done:
-					break ExitForLoop
+				case <-t.done:
+					return
 				default:
 					n, err := conn.Write(buff[:bytesToSend])
 					if err != nil {
@@ -992,11 +957,12 @@ func runUDPBandwidthAndPpsTest(test *ethrTest) {
 					}
 					atomic.AddUint64(&ec.bw, uint64(n))
 					atomic.AddUint64(&ec.pps, 1)
-					atomic.AddUint64(&test.testResult.bw, uint64(n))
-					atomic.AddUint64(&test.testResult.pps, 1)
-					if !test.clientParam.Reverse {
+					atomic.AddUint64(&t.testResult.bw, uint64(n))
+					atomic.AddUint64(&t.testResult.pps, 1)
+					if !t.clientParam.Reverse {
 						sentBytes += uint64(n)
-						start, waitTime, sentBytes, bytesToSend = enforceThrottle(start, waitTime, totalBytesToSend, sentBytes, bufferLen)
+						start, waitTime, sentBytes, bytesToSend = enforceThrottle(
+							start, waitTime, totalBytesToSend, sentBytes, bufferLen)
 					}
 				}
 			}

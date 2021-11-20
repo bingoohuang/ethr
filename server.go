@@ -16,12 +16,6 @@ import (
 	"time"
 )
 
-var gCert []byte
-
-func initServer(showUI bool) {
-	initServerUI(showUI)
-}
-
 func finiServer() {
 	ui.fini()
 	logFini()
@@ -29,65 +23,63 @@ func finiServer() {
 
 func showAcceptedIPVersion() {
 	var ipVerString = "ipv4, ipv6"
-	if gIPVersion == ethrIPv4 {
+	if ipVer == iPv4 {
 		ipVerString = "ipv4"
-	} else if gIPVersion == ethrIPv6 {
+	} else if ipVer == iPv6 {
 		ipVerString = "ipv6"
 	}
 	ui.printMsg("Accepting IP version: %s", ipVerString)
 }
 
-func runServer(serverParam ethrServerParam) {
+func runServer(serverParam serverParam) {
 	defer stopStatsTimer()
 	initServer(serverParam.showUI)
 	startStatsTimer()
 	fmt.Println("-----------------------------------------------------------")
 	showAcceptedIPVersion()
-	ui.printMsg("Listening on port %d for TCP & UDP", gEthrPort)
-	srvrRunUDPServer()
-	err := srvrRunTCPServer()
-	if err != nil {
+	ui.printMsg("Listening on port %d for TCP & UDP", gPort)
+	runUDPServer()
+	if err := runTCPServer(); err != nil {
 		finiServer()
 		fmt.Printf("Fatal error running TCP server: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func handshakeWithClient(test *ethrTest, conn net.Conn) (testID EthrTestID, clientParam EthrClientParam, err error) {
-	ethrMsg := recvSessionMsg(conn)
-	if ethrMsg.Type != EthrSyn {
+func handshakeWithClient(conn net.Conn) (testID TestID, clientParam clientParam, err error) {
+	msg := recvSessionMsg(conn)
+	if msg.Type != Syn {
 		ui.printDbg("Failed to receive SYN message from client.")
 		err = os.ErrInvalid
 		return
 	}
-	testID = ethrMsg.Syn.TestID
-	clientParam = ethrMsg.Syn.ClientParam
-	ethrMsg = createAckMsg()
-	err = sendSessionMsg(conn, ethrMsg)
+	testID = msg.Syn.TestID
+	clientParam = msg.Syn.ClientParam
+	ackMsg := createAckMsg()
+	err = ackMsg.send(conn)
 	return
 }
 
-func srvrRunTCPServer() error {
-	l, err := net.Listen(Tcp(), gLocalIP+":"+gEthrPortStr)
+func runTCPServer() error {
+	l, err := net.Listen(Tcp(), gLocalIP+":"+gPortStr)
 	if err != nil {
 		return err
 	}
 	defer l.Close()
 	for {
-		conn, err := l.Accept()
+		c, err := l.Accept()
 		if err != nil {
 			ui.printErr("Error accepting new TCP connection: %v", err)
 			continue
 		}
-		go srvrHandleNewTcpConn(conn)
+		go handleNewTcpConn(c)
 	}
 }
 
-func srvrHandleNewTcpConn(conn net.Conn) {
+func handleNewTcpConn(conn net.Conn) {
 	defer conn.Close()
 
 	server, port, err := net.SplitHostPort(conn.RemoteAddr().String())
-	ethrUnused(server, port)
 	if err != nil {
 		ui.printDbg("RemoteAddr: Split host port failed: %v", err)
 		return
@@ -97,11 +89,10 @@ func srvrHandleNewTcpConn(conn net.Conn) {
 		ui.printDbg("LocalAddr: Split host port failed: %v", err)
 		return
 	}
-	ethrUnused(lserver, lport)
 	ui.printDbg("New connection from %v, port %v to %v, port %v", server, port, lserver, lport)
 
-	test, isNew := createOrGetTest(server, TCP, All)
-	if test == nil {
+	t, isNew := createOrGetTest(server, TCP, All)
+	if t == nil {
 		return
 	}
 	if isNew {
@@ -120,37 +111,38 @@ func srvrHandleNewTcpConn(conn net.Conn) {
 		if isCPSorPing {
 			time.Sleep(2 * time.Second)
 		}
-		safeDeleteTest(test)
+		t.safeDeleteTest()
 	}()
 
 	// Always increment CPS count and then check if the test is Bandwidth etc. and handle
 	// those cases as well.
-	atomic.AddUint64(&test.testResult.cps, 1)
+	atomic.AddUint64(&t.testResult.cps, 1)
 
-	testID, clientParam, err := handshakeWithClient(test, conn)
+	testID, clientParam, err := handshakeWithClient(conn)
 	if err != nil {
 		ui.printDbg("Failed in handshake with the client. Error: %v", err)
 		return
 	}
 	isCPSorPing = false
 	if testID.Protocol == TCP {
-		if testID.Type == Bandwidth {
-			srvrRunTCPBandwidthTest(test, clientParam, conn)
-		} else if testID.Type == Latency {
+		switch testID.Type {
+		case Bandwidth:
+			t.runTCPBandwidthTest(clientParam, conn)
+		case Latency:
 			ui.emitLatencyHdr()
-			srvrRunTCPLatencyTest(test, clientParam, conn)
+			t.serverRunTCPLatencyTest(clientParam, conn)
 		}
 	}
 }
 
-func srvrRunTCPBandwidthTest(test *ethrTest, clientParam EthrClientParam, conn net.Conn) {
+func (t *test) runTCPBandwidthTest(clientParam clientParam, conn net.Conn) {
 	size := clientParam.BufferSize
 	buff := make([]byte, size)
 	for i := uint32(0); i < size; i++ {
 		buff[i] = byte(i)
 	}
 	bufferLen := len(buff)
-	totalBytesToSend := test.clientParam.BwRate
+	totalBytesToSend := t.clientParam.BwRate
 	sentBytes := uint64(0)
 	start, waitTime, bytesToSend := beginThrottle(totalBytesToSend, bufferLen)
 	for {
@@ -165,15 +157,16 @@ func srvrRunTCPBandwidthTest(test *ethrTest, clientParam EthrClientParam, conn n
 			ui.printDbg("Error sending/receiving data on a connection for bandwidth test: %v", err)
 			break
 		}
-		atomic.AddUint64(&test.testResult.bw, uint64(size))
+		atomic.AddUint64(&t.testResult.bw, uint64(size))
 		if clientParam.Reverse {
 			sentBytes += uint64(n)
-			start, waitTime, sentBytes, bytesToSend = enforceThrottle(start, waitTime, totalBytesToSend, sentBytes, bufferLen)
+			start, waitTime, sentBytes, bytesToSend = enforceThrottle(
+				start, waitTime, totalBytesToSend, sentBytes, bufferLen)
 		}
 	}
 }
 
-func srvrRunTCPLatencyTest(test *ethrTest, clientParam EthrClientParam, conn net.Conn) {
+func (t *test) serverRunTCPLatencyTest(clientParam clientParam, conn net.Conn) {
 	bytes := make([]byte, clientParam.BufferSize)
 	rttCount := clientParam.RttCount
 	latencyNumbers := make([]time.Duration, rttCount)
@@ -185,13 +178,11 @@ func srvrRunTCPLatencyTest(test *ethrTest, clientParam EthrClientParam, conn net
 		}
 		for i := uint32(0); i < rttCount; i++ {
 			s1 := time.Now()
-			_, err = conn.Write(bytes)
-			if err != nil {
+			if _, err = conn.Write(bytes); err != nil {
 				ui.printDbg("Error sending data for latency test: %v", err)
 				return
 			}
-			_, err = io.ReadFull(conn, bytes)
-			if err != nil {
+			if _, err = io.ReadFull(conn, bytes); err != nil {
 				ui.printDbg("Error receiving data for latency test: %v", err)
 				return
 			}
@@ -215,7 +206,7 @@ func srvrRunTCPLatencyTest(test *ethrTest, clientParam EthrClientParam, conn net
 		if rttCountFixed == 1 {
 			rttCountFixed = 2
 		}
-		atomic.SwapUint64(&test.testResult.latency, uint64(elapsed.Nanoseconds()))
+		atomic.SwapUint64(&t.testResult.latency, uint64(elapsed.Nanoseconds()))
 		avg := elapsed
 		min := latencyNumbers[0]
 		max := latencyNumbers[rttCount-1]
@@ -225,22 +216,20 @@ func srvrRunTCPLatencyTest(test *ethrTest, clientParam EthrClientParam, conn net
 		p99 := latencyNumbers[((rttCountFixed*99)/100)-1]
 		p999 := latencyNumbers[uint64(((float64(rttCountFixed)*99.9)/100)-1)]
 		p9999 := latencyNumbers[uint64(((float64(rttCountFixed)*99.99)/100)-1)]
-		ui.emitLatencyResults(
-			test.session.remoteIP,
-			protoToString(test.testID.Protocol),
+		ui.emitLatencyResults(t.session.remoteIP, t.testID.Protocol.String(),
 			avg, min, max, p50, p90, p95, p99, p999, p9999)
 	}
 }
 
-func srvrRunUDPServer() error {
-	udpAddr, err := net.ResolveUDPAddr(Udp(), gLocalIP+":"+gEthrPortStr)
+func runUDPServer() error {
+	udpAddr, err := net.ResolveUDPAddr(Udp(), gLocalIP+":"+gPortStr)
 	if err != nil {
 		ui.printDbg("Unable to resolve UDP address: %v", err)
 		return err
 	}
 	l, err := net.ListenUDP(Udp(), udpAddr)
 	if err != nil {
-		ui.printDbg("Error listening on %s for UDP pkt/s tests: %v", gEthrPortStr, err)
+		ui.printDbg("Error listening on %s for UDP pkt/s tests: %v", gPortStr, err)
 		return err
 	}
 	// Set socket buffer to 4MB per CPU so we can queue 4MB per CPU in case Ethr is not
@@ -256,15 +245,15 @@ func srvrRunUDPServer() error {
 	// more threads than NumCPU(). TODO: Evaluate this in future.
 	//
 	for i := 0; i < runtime.NumCPU(); i++ {
-		go srvrRunUDPPacketHandler(l)
+		go runUDPPacketHandler(l)
 	}
 	return nil
 }
 
-func srvrRunUDPPacketHandler(conn *net.UDPConn) {
+func runUDPPacketHandler(conn *net.UDPConn) {
 	// This local map aids in efficiency to look up a test based on client's IP
 	// address. We could use createOrGetTest but that takes a global lock.
-	tests := make(map[string]*ethrTest)
+	tests := make(map[string]*test)
 	// For UDP, allocate buffer that can accomodate largest UDP datagram.
 	readBuffer := make([]byte, 64*1024)
 	n, remoteIP, err := 0, new(net.UDPAddr), error(nil)
@@ -280,14 +269,15 @@ func srvrRunUDPPacketHandler(conn *net.UDPConn) {
 				ui.printDbg("Found Test from server: %v, time: %v", k, v.lastAccess)
 				// At 200ms of no activity, mark the test in-active so stats stop
 				// printing.
-				if time.Since(v.lastAccess) > (200 * time.Millisecond) {
+				duration := time.Since(v.lastAccess)
+				if duration > 200*time.Millisecond {
 					v.isDormant = true
 				}
 				// At 2s of no activity, delete the test by assuming that client
 				// has stopped.
-				if time.Since(v.lastAccess) > (2 * time.Second) {
+				if duration > 2*time.Second {
 					ui.printDbg("Deleting UDP test from server: %v, lastAccess: %v", k, v.lastAccess)
-					safeDeleteTest(v)
+					v.safeDeleteTest()
 					delete(tests, k)
 				}
 			}
@@ -299,10 +289,8 @@ func srvrRunUDPPacketHandler(conn *net.UDPConn) {
 			ui.printDbg("Error receiving data from UDP for bandwidth test: %v", err)
 			continue
 		}
-		ethrUnused(remoteIP)
-		ethrUnused(n)
 		server, port, _ := net.SplitHostPort(remoteIP.String())
-		test, found := tests[server]
+		t, found := tests[server]
 		if !found {
 			test, isNew := createOrGetTest(server, UDP, All)
 			if test != nil {
@@ -313,13 +301,13 @@ func srvrRunUDPPacketHandler(conn *net.UDPConn) {
 				ui.emitTestHdr()
 			}
 		}
-		if test != nil {
-			test.isDormant = false
-			test.lastAccess = time.Now()
-			atomic.AddUint64(&test.testResult.pps, 1)
-			atomic.AddUint64(&test.testResult.bw, uint64(n))
+		if t != nil {
+			t.isDormant = false
+			t.lastAccess = time.Now()
+			atomic.AddUint64(&t.testResult.pps, 1)
+			atomic.AddUint64(&t.testResult.bw, uint64(n))
 		} else {
-			ui.printDbg("Unable to create test for UDP traffic on port %s from %s port %s", gEthrPortStr, server, port)
+			ui.printDbg("Unable to create test for UDP traffic on port %s from %s port %s", gPortStr, server, port)
 		}
 	}
 }

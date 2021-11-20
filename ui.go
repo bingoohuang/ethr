@@ -181,12 +181,6 @@ func printCenterText(x, y, w int, text string, fg, bg tm.Attribute) {
 	}
 }
 
-func printHLine(x, y int, w int) {
-	for i := 0; i < w; i++ {
-		tm.SetCell(x+i, y, symbols[horizontal], tm.ColorWhite, tm.ColorDefault)
-	}
-}
-
 func printUsageBar(x, y, w int, usage, scale uint64, clr tm.Attribute) {
 	barw := int(math.Log10(float64(uint64((usage + scale - 1) / (scale / 10)))))
 	if barw > w {
@@ -202,13 +196,6 @@ func printUsageBar(x, y, w int, usage, scale uint64, clr tm.Attribute) {
 	}
 }
 
-func printDivider() {
-	ui.printMsg("-----------------------------------------------------------")
-}
-func printDivider2() {
-	ui.printMsg("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -")
-}
-
 type ethrUI interface {
 	fini()
 	getTitle() string
@@ -220,10 +207,10 @@ type ethrUI interface {
 	emitLatencyHdr()
 	emitLatencyResults(remote, proto string, avg, min, max, p50, p90, p95, p99, p999, p9999 time.Duration)
 	emitTestResultBegin()
-	emitTestResult(*ethrSession, EthrProtocol, uint64)
+	emitTestResult(*session, Protocol, uint64)
 	printTestResults([]string)
 	emitTestResultEnd()
-	emitStats(ethrNetStat)
+	emitStats(netStat)
 }
 
 var ui ethrUI

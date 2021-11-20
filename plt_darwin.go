@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func getNetDevStats(stats *ethrNetStat) {
+func getNetDevStats(stats *netStat) {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		ui.printErr("%v", err)
@@ -30,36 +30,36 @@ func getNetDevStats(stats *ethrNetStat) {
 			continue
 		}
 
+		if argIf != "" && argIf != iface.Name {
+			continue
+		}
+
 		ifaceData, err := getIfaceData(iface.Index)
 		if err != nil {
 			ui.printErr("Failed to load data for interface %q: %v", iface.Name, err)
 			continue
 		}
 
-		if argIf == "" || argIf == iface.Name {
-			stats.netDevStats = append(stats.netDevStats, ethrNetDevStat{
-				interfaceName: iface.Name,
-				rxBytes:       ifaceData.Data.Ibytes,
-				rxPkts:        ifaceData.Data.Ipackets,
-				txBytes:       ifaceData.Data.Obytes,
-				txPkts:        ifaceData.Data.Opackets,
-			})
-		}
+		stats.netDevStats = append(stats.netDevStats, netDevStat{
+			interfaceName: iface.Name,
+			rxBytes:       ifaceData.Data.Ibytes,
+			rxPkts:        ifaceData.Data.Ipackets,
+			txBytes:       ifaceData.Data.Obytes,
+			txPkts:        ifaceData.Data.Opackets,
+		})
 	}
+	return
 }
 
-func getTCPStats(stats *ethrNetStat) {
+func getTCPStats(stats *netStat) {
 	var data tcpStat
 	rawData, err := unix.SysctlRaw("net.inet.tcp.stats")
 	if err != nil {
-		// return EthrTCPStat{}, errors.Wrap(err, "GetTCPStats: could not get net.inet.tcp.stats")
 		return
 	}
 	buf := bytes.NewReader(rawData)
 	binary.Read(buf, binary.LittleEndian, &data)
 
-	// return EthrTCPStat{uint64(data.Sndrexmitpack)}, nil
-	// return the TCP Retransmits
 	stats.tcpStats.segRetrans = uint64(data.Sndrexmitpack)
 	return
 }
@@ -72,11 +72,12 @@ func blockWindowResize() {
 }
 
 func getIfaceData(index int) (*ifMsghdr2, error) {
-	var data ifMsghdr2
 	rawData, err := unix.SysctlRaw("net", unix.AF_ROUTE, 0, 0, unix.NET_RT_IFLIST2, index)
 	if err != nil {
 		return nil, err
 	}
+
+	var data ifMsghdr2
 	err = binary.Read(bytes.NewReader(rawData), binary.LittleEndian, &data)
 	return &data, err
 }
@@ -385,20 +386,18 @@ func IcmpNewConn(address string) (net.PacketConn, error) {
 	return conn, nil
 }
 
-func VerifyPermissionForTest(testID EthrTestID) {
-	if testID.Protocol == ICMP || (testID.Protocol == TCP &&
-		(testID.Type == TraceRoute || testID.Type == MyTraceRoute)) {
+func VerifyPermissionForTest(testID TestID) {
+	p := testID.Protocol
+	t := testID.Type
+	if p == ICMP || (p == TCP && (t == TraceRoute || t == MyTraceRoute)) {
 		if !IsAdmin() {
-			ui.printMsg("Warning: You are not running as administrator. For %s based %s",
-				protoToString(testID.Protocol), testToString(testID.Type))
+			ui.printMsg("Warning: You are not running as administrator. For %s based %s", p, t)
 			ui.printMsg("test, running as administrator is required.\n")
 		}
 	}
 }
 
-func IsAdmin() bool {
-	return true
-}
+func IsAdmin() bool { return true }
 
 func SetTClass(fd uintptr, tos int) {
 	setSockOptInt(fd, syscall.IPPROTO_IPV6, syscall.IPV6_TCLASS, tos)

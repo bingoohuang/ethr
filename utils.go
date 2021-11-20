@@ -18,37 +18,31 @@ import (
 )
 
 var gLocalIP = ""
-var gEthrPort = uint16(8888)
-var gEthrPortStr = ""
+var gPort = uint16(12321)
+var gPortStr = ""
 var gClientPort = uint16(0)
 var gTOS = uint8(0)
 var gTTL = uint8(0)
 
 const (
-	UNO  = 1
 	KILO = 1000
-	MEGA = 1000 * 1000
-	GIGA = 1000 * 1000 * 1000
-	TERA = 1000 * 1000 * 1000 * 1000
+	MEGA = 1000 * KILO
+	GIGA = 1000 * MEGA
+	TERA = 1000 * GIGA
 )
 
 func numberToUnit(num uint64) string {
-	unit := ""
-	value := float64(num)
+	unit, value := "", float64(num)
 
 	switch {
 	case num >= TERA:
-		unit = "T"
-		value = value / TERA
+		unit, value = "T", value/TERA
 	case num >= GIGA:
-		unit = "G"
-		value = value / GIGA
+		unit, value = "G", value/GIGA
 	case num >= MEGA:
-		unit = "M"
-		value = value / MEGA
+		unit, value = "M", value/MEGA
 	case num >= KILO:
-		unit = "K"
-		value = value / KILO
+		unit, value = "K", value/KILO
 	}
 
 	result := strconv.FormatFloat(value, 'f', 2, 64)
@@ -93,23 +87,19 @@ func unitToNumber(s string) uint64 {
 }
 
 func bytesToRate(bytes uint64) string {
-	bits := bytes * 8
-	result := numberToUnit(bits)
-	return result
+	return numberToUnit(bytes * 8)
 }
 
 func cpsToString(cps uint64) string {
-	result := numberToUnit(cps)
-	return result
+	return numberToUnit(cps)
 }
 
 func ppsToString(pps uint64) string {
-	result := numberToUnit(pps)
-	return result
+	return numberToUnit(pps)
 }
 
-func testToString(testType EthrTestType) string {
-	switch testType {
+func (t TestType) String() string {
+	switch t {
 	case Bandwidth:
 		return "Bandwidth"
 	case Cps:
@@ -158,8 +148,8 @@ func durationToString(d time.Duration) string {
 	return d.String()
 }
 
-func protoToString(proto EthrProtocol) string {
-	switch proto {
+func (p Protocol) String() string {
+	switch p {
 	case TCP:
 		return "TCP"
 	case UDP:
@@ -171,28 +161,28 @@ func protoToString(proto EthrProtocol) string {
 }
 
 func Tcp() string {
-	switch gIPVersion {
-	case ethrIPv4:
+	switch ipVer {
+	case iPv4:
 		return "tcp4"
-	case ethrIPv6:
+	case iPv6:
 		return "tcp6"
 	}
 	return "tcp"
 }
 
 func Udp() string {
-	switch gIPVersion {
-	case ethrIPv4:
+	switch ipVer {
+	case iPv4:
 		return "udp4"
-	case ethrIPv6:
+	case iPv6:
 		return "udp6"
 	}
 	return "udp"
 }
 
 func Icmp() string {
-	switch gIPVersion {
-	case ethrIPv6:
+	switch ipVer {
+	case iPv6:
 		return "ip6:ipv6-icmp"
 	default:
 		return "ip4:icmp"
@@ -200,16 +190,10 @@ func Icmp() string {
 }
 
 func IcmpProto() int {
-	if gIPVersion == ethrIPv6 {
+	if ipVer == iPv6 {
 		return ICMPv6
 	}
 	return ICMPv4
-}
-
-func ethrUnused(vals ...interface{}) {
-	for _, val := range vals {
-		_ = val
-	}
 }
 
 func splitString(longString string, maxLen int) []string {
@@ -224,26 +208,6 @@ func splitString(longString string, maxLen int) []string {
 	}
 	splits = append(splits, longString[l:])
 	return splits
-}
-
-func max(x, y uint64) uint64 {
-	if x < y {
-		return y
-	}
-	return x
-}
-
-func toString(n int) string {
-	return fmt.Sprintf("%d", n)
-}
-
-func toInt(s string) int {
-	res, err := strconv.Atoi(s)
-	if err != nil {
-		ui.printDbg("Error in string conversion: %v", err)
-		return 0
-	}
-	return res
 }
 
 func truncateStringFromStart(str string, num int) string {
@@ -272,11 +236,6 @@ func truncateStringFromEnd(str string, num int) string {
 	return s
 }
 
-func roundUpToZero(n int64) int64 {
-	y := n >> 63
-	return (n ^ y) - y
-}
-
 func getFd(conn net.Conn) uintptr {
 	var fd uintptr
 	var rc syscall.RawConn
@@ -302,20 +261,6 @@ func getFd(conn net.Conn) uintptr {
 	return fd
 }
 
-type tcpKeepAliveListener struct {
-	*net.TCPListener
-}
-
-func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
-	tc, err := ln.AcceptTCP()
-	if err != nil {
-		return
-	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	return tc, nil
-}
-
 func SleepUntilNextWholeSecond() {
 	t0 := time.Now()
 	t1 := t0.Add(time.Second)
@@ -323,55 +268,56 @@ func SleepUntilNextWholeSecond() {
 	time.Sleep(time.Until(res))
 }
 
-func ethrSetTTL(fd uintptr, ttl int) {
+func setTTL(fd uintptr, ttl int) {
 	if ttl == 0 {
 		return
 	}
-	if gIPVersion == ethrIPv4 {
+	if ipVer == iPv4 {
 		setSockOptInt(fd, syscall.IPPROTO_IP, syscall.IP_TTL, ttl)
 	} else {
 		setSockOptInt(fd, syscall.IPPROTO_IPV6, syscall.IPV6_UNICAST_HOPS, ttl)
 	}
 }
 
-func ethrSetTOS(fd uintptr, tos int) {
+func setTOS(fd uintptr, tos int) {
 	if tos == 0 {
 		return
 	}
-	if gIPVersion == ethrIPv4 {
+	if ipVer == iPv4 {
 		setSockOptInt(fd, syscall.IPPROTO_IP, syscall.IP_TOS, tos)
 	} else {
 		SetTClass(fd, tos)
 	}
 }
 
-func ethrDial(p EthrProtocol, dialAddr string) (conn net.Conn, err error) {
-	return ethrDialEx(p, dialAddr, gLocalIP, gClientPort, int(gTTL), int(gTOS))
+func (p Protocol) dial(dialAddr string) (conn net.Conn, err error) {
+	return p.dialEx(dialAddr, gLocalIP, gClientPort, int(gTTL), int(gTOS))
 }
 
-func ethrDialInc(p EthrProtocol, dialAddr string, inc uint16) (conn net.Conn, err error) {
-	if gClientPort != 0 {
-		return ethrDialEx(p, dialAddr, gLocalIP, gClientPort+inc, int(gTTL), int(gTOS))
-	} else {
-		return ethrDial(p, dialAddr)
+func (p Protocol) dialInc(dialAddr string, inc uint16) (conn net.Conn, err error) {
+	if gClientPort == 0 {
+		return p.dial(dialAddr)
 	}
+
+	return p.dialEx(dialAddr, gLocalIP, gClientPort+inc, int(gTTL), int(gTOS))
 }
 
-func ethrDialAll(p EthrProtocol, dialAddr string) (conn net.Conn, err error) {
-	return ethrDialEx(p, dialAddr, gLocalIP, 0, int(gTTL), int(gTOS))
+func (p Protocol) dialAll(dialAddr string) (conn net.Conn, err error) {
+	return p.dialEx(dialAddr, gLocalIP, 0, int(gTTL), int(gTOS))
 }
 
-func ethrDialEx(p EthrProtocol, dialAddr, localIP string, localPortNum uint16, ttl int, tos int) (conn net.Conn, err error) {
+func (p Protocol) dialEx(dialAddr, localIP string, localPortNum uint16, ttl, tos int) (conn net.Conn, err error) {
 	localAddr := fmt.Sprintf("%v:%v", localIP, localPortNum)
 	var la net.Addr
 	network := Tcp()
-	if p == TCP {
+	switch p {
+	case TCP:
 		la, err = net.ResolveTCPAddr(network, localAddr)
-	} else if p == UDP {
+	case UDP:
 		network = Udp()
 		la, err = net.ResolveUDPAddr(network, localAddr)
-	} else {
-		ui.printDbg("Only TCP or UDP are allowed in ethrDial")
+	default:
+		ui.printDbg("Only TCP or UDP are allowed in dialEx")
 		err = os.ErrInvalid
 		return
 	}
@@ -382,8 +328,8 @@ func ethrDialEx(p EthrProtocol, dialAddr, localIP string, localPortNum uint16, t
 	dialer := &net.Dialer{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				ethrSetTTL(fd, ttl)
-				ethrSetTOS(fd, tos)
+				setTTL(fd, ttl)
+				setTOS(fd, tos)
 			})
 		},
 	}
@@ -391,24 +337,22 @@ func ethrDialEx(p EthrProtocol, dialAddr, localIP string, localPortNum uint16, t
 	dialer.Timeout = time.Second
 	conn, err = dialer.Dial(network, dialAddr)
 	if err != nil {
-		ui.printDbg("ethrTCPDial Error: %v", err)
-	} else {
-		tcpconn, ok := conn.(*net.TCPConn)
-		if ok {
-			tcpconn.SetLinger(0)
-		}
-		udpconn, ok := conn.(*net.UDPConn)
-		if ok {
-			err = udpconn.SetWriteBuffer(4 * 1024 * 1024)
-			if err != nil {
-				ui.printDbg("Failed to set ReadBuffer on UDP socket: %v", err)
-			}
+		ui.printDbg("Dial Error: %v", err)
+		return
+	}
+
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetLinger(0)
+	} else if uc, ok2 := conn.(*net.UDPConn); ok2 {
+		if err := uc.SetWriteBuffer(4 * 1024 * 1024); err != nil {
+			ui.printDbg("Failed to set ReadBuffer on UDP socket: %v", err)
 		}
 	}
+
 	return
 }
 
-func ethrLookupIP(server string) (net.IPAddr, string, error) {
+func lookupIP(server string) (net.IPAddr, string, error) {
 	var ipAddr net.IPAddr
 	var ipStr string
 
@@ -424,8 +368,9 @@ func ethrLookupIP(server string) (net.IPAddr, string, error) {
 		ui.printErr("Failed to lookup IP address for the server: %v. Error: %v", server, err)
 		return ipAddr, ipStr, err
 	}
+
 	for _, ip := range ips {
-		if gIPVersion == ethrIPAny || (gIPVersion == ethrIPv4 && ip.To4() != nil) || (gIPVersion == ethrIPv6 && ip.To16() != nil) {
+		if ipVer.IsValid(ip) {
 			ipAddr.IP = ip
 			ipStr = ip.String()
 			ui.printDbg("Resolved server: %v to IP address: %v\n", server, ip)
@@ -449,7 +394,8 @@ func beginThrottle(totalBytesToSend uint64, bufferLen int) (start time.Time, wai
 	return
 }
 
-func enforceThrottle(s time.Time, wt time.Duration, totalBytesToSend, oldSentBytes uint64, bufferLen int) (start time.Time, waitTime time.Duration, newSentBytes uint64, bytesToSend int) {
+func enforceThrottle(s time.Time, wt time.Duration, totalBytesToSend, oldSentBytes uint64, bufferLen int) (
+	start time.Time, waitTime time.Duration, newSentBytes uint64, bytesToSend int) {
 	start = s
 	waitTime = wt
 	newSentBytes = oldSentBytes

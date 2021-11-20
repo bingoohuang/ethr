@@ -19,7 +19,7 @@ import (
 	tm "github.com/nsf/termbox-go"
 )
 
-type ethrNetDevInfo struct {
+type netDevInfo struct {
 	bytes      uint64
 	packets    uint64
 	drop       uint64
@@ -33,7 +33,7 @@ type ethrNetDevInfo struct {
 type osStats struct {
 }
 
-func getNetDevStats(stats *ethrNetStat) {
+func getNetDevStats(stats *netStat) {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		ui.printErr("%v", err)
@@ -57,21 +57,17 @@ func getNetDevStats(stats *ethrNetStat) {
 
 	var line string
 	for err == nil {
-		line, err = reader.ReadString('\n')
-		if line == "" {
+		if line, err = reader.ReadString('\n'); line == "" {
 			continue
 		}
-		netDevStat := buildNetDevStat(line)
-
-		if argIf == "" || argIf == netDevStat.interfaceName {
-			if isIfUp(netDevStat.interfaceName, ifs) {
-				stats.netDevStats = append(stats.netDevStats, buildNetDevStat(line))
-			}
+		s := buildNetDevStat(line)
+		if n := s.interfaceName; (argIf == "" || argIf == n) && isIfUp(n, ifs) {
+			stats.netDevStats = append(stats.netDevStats, buildNetDevStat(line))
 		}
 	}
 }
 
-func getTCPStats(stats *ethrNetStat) {
+func getTCPStats(stats *netStat) {
 	snmpStatsFile, err := os.Open("/proc/net/snmp")
 	if err != nil {
 		ui.printDbg("%v", err)
@@ -106,15 +102,15 @@ func hideCursor() {
 func blockWindowResize() {
 }
 
-func buildNetDevStat(line string) ethrNetDevStat {
+func buildNetDevStat(line string) netDevStat {
 	fields := strings.Fields(line)
 	if len(fields) < 17 {
-		return ethrNetDevStat{}
+		return netDevStat{}
 	}
 	interfaceName := strings.TrimSuffix(fields[0], ":")
 	rxInfo := toNetDevInfo(fields[1:9])
 	txInfo := toNetDevInfo(fields[9:17])
-	return ethrNetDevStat{
+	return netDevStat{
 		interfaceName: interfaceName,
 		rxBytes:       rxInfo.bytes,
 		txBytes:       txInfo.bytes,
@@ -123,8 +119,8 @@ func buildNetDevStat(line string) ethrNetDevStat {
 	}
 }
 
-func toNetDevInfo(fields []string) ethrNetDevInfo {
-	return ethrNetDevInfo{
+func toNetDevInfo(fields []string) netDevInfo {
+	return netDevInfo{
 		bytes:      toUInt64(fields[0]),
 		packets:    toUInt64(fields[1]),
 		errs:       toUInt64(fields[2]),
@@ -140,7 +136,6 @@ func toUInt64(str string) uint64 {
 	res, err := strconv.ParseUint(str, 10, 64)
 	if err != nil {
 		ui.printDbg("Error in string conversion: %v", err)
-		return 0
 	}
 	return res
 }
@@ -148,10 +143,7 @@ func toUInt64(str string) uint64 {
 func isIfUp(ifName string, ifs []net.Interface) bool {
 	for _, ifi := range ifs {
 		if ifi.Name == ifName {
-			if (ifi.Flags & net.FlagUp) != 0 {
-				return true
-			}
-			return false
+			return (ifi.Flags & net.FlagUp) != 0
 		}
 	}
 	return false
@@ -172,27 +164,21 @@ func IcmpNewConn(address string) (net.PacketConn, error) {
 	}
 	localAddr := dialedConn.LocalAddr()
 	dialedConn.Close()
-	conn, err := net.ListenPacket(Icmp(), localAddr.String())
-	if err != nil {
-		return nil, err
-	}
-	return conn, nil
+	return net.ListenPacket(Icmp(), localAddr.String())
 }
 
-func VerifyPermissionForTest(testID EthrTestID) {
-	if testID.Protocol == ICMP || (testID.Protocol == TCP &&
-		(testID.Type == TraceRoute || testID.Type == MyTraceRoute)) {
+func VerifyPermissionForTest(testID TestID) {
+	p := testID.Protocol
+	t := testID.Type
+	if p == ICMP || (p == TCP && (t == TraceRoute || t == MyTraceRoute)) {
 		if !IsAdmin() {
-			ui.printMsg("Warning: You are not running as administrator. For %s based %s",
-				protoToString(testID.Protocol), testToString(testID.Type))
+			ui.printMsg("Warning: You are not running as administrator. For %s based %s", p, t)
 			ui.printMsg("test, running as administrator is required.\n")
 		}
 	}
 }
 
-func IsAdmin() bool {
-	return os.Geteuid() == 0
-}
+func IsAdmin() bool { return os.Geteuid() == 0 }
 
 func SetTClass(fd uintptr, tos int) {
 	setSockOptInt(fd, syscall.IPPROTO_IPV6, syscall.IPV6_TCLASS, tos)

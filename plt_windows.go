@@ -38,7 +38,7 @@ type ethrNetDevInfo struct {
 	errs    uint64
 }
 
-func getNetDevStats(stats *ethrNetStat) {
+func getNetDevStats(stats *netStat) {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		ui.printErr("%v", err)
@@ -68,7 +68,7 @@ func getNetDevStats(stats *ethrNetStat) {
 				drop:    uint64(row.OutDiscards),
 				errs:    uint64(row.OutErrors),
 			}
-			netStats := ethrNetDevStat{
+			netStats := netDevStat{
 				interfaceName: ifi.Name,
 				rxBytes:       rxInfo.bytes,
 				txBytes:       txInfo.bytes,
@@ -103,7 +103,7 @@ const (
 	AF_INET6 = 23
 )
 
-func getTCPStats(stats *ethrNetStat) (errcode error) {
+func getTCPStats(stats *netStat) (errcode error) {
 	tcpStats := &mib_tcpstats{}
 	r0, _, _ := syscall.Syscall(proc_get_tcp_statistics_ex.Addr(), 2,
 		uintptr(unsafe.Pointer(tcpStats)), uintptr(AF_INET), 0)
@@ -271,12 +271,12 @@ func IcmpNewConn(address string) (net.PacketConn, error) {
 	return conn, nil
 }
 
-func VerifyPermissionForTest(testID EthrTestID) {
-	if (testID.Type == TraceRoute || testID.Type == MyTraceRoute) &&
-		(testID.Protocol == TCP) {
+func VerifyPermissionForTest(testID TestID) {
+	t := testID.Type
+	p := testID.Protocol
+	if (t == TraceRoute || t == MyTraceRoute) && (p == TCP) {
 		if !IsAdmin() {
-			ui.printMsg("Warning: You are not running as administrator. For %s based %s",
-				protoToString(testID.Protocol), testToString(testID.Type))
+			ui.printMsg("Warning: You are not running as administrator. For %s based %s", p, t)
 			ui.printMsg("test, running as administrator is required.\n")
 		}
 	}
