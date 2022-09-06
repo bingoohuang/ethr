@@ -1,11 +1,11 @@
 //go:build linux
 // +build linux
 
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
 // Licensed under the MIT license.
 // See LICENSE.txt file in the project root for full license information.
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 package main
 
 import (
@@ -30,8 +30,7 @@ type netDevInfo struct {
 	multicast  uint64
 }
 
-type osStats struct {
-}
+type osStats struct{}
 
 func getNetDevStats(stats *netStat) {
 	ifs, err := net.Interfaces()

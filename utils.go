@@ -1,8 +1,8 @@
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
 // Licensed under the MIT license.
 // See LICENSE.txt file in the project root for full license information.
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 package main
 
 import (
@@ -397,7 +397,8 @@ func beginThrottle(totalBytesToSend uint64, bufferLen int) (start time.Time, wai
 }
 
 func enforceThrottle(s time.Time, wt time.Duration, totalBytesToSend, oldSentBytes uint64, bufferLen int) (
-	start time.Time, waitTime time.Duration, newSentBytes uint64, bytesToSend int) {
+	start time.Time, waitTime time.Duration, newSentBytes uint64, bytesToSend int,
+) {
 	start = s
 	waitTime = wt
 	newSentBytes = oldSentBytes

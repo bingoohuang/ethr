@@ -1,8 +1,8 @@
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
 // Licensed under the MIT license.
 // See LICENSE.txt file in the project root for full license information.
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 package main
 
 import (
@@ -23,9 +23,7 @@ type ethrTestResultAggregate struct {
 
 var gAggregateTestResults = make(map[Protocol]*ethrTestResultAggregate)
 
-//
 // Initialization functions.
-//
 func initServer(showUI bool) {
 	gAggregateTestResults[TCP] = &ethrTestResultAggregate{}
 	gAggregateTestResults[UDP] = &ethrTestResultAggregate{}
@@ -35,9 +33,7 @@ func initServer(showUI bool) {
 	}
 }
 
-//
 // Text based UI
-//
 type serverTui struct {
 	h, w                               int
 	resX, resY, resW                   int
@@ -292,11 +288,8 @@ func (u *serverTui) emitStats(netStats netStat) {
 	gCurNetStats = netStats
 }
 
-//
 // Simple command window based output
-//
-type serverCli struct {
-}
+type serverCli struct{}
 
 func initServerCli() {
 	cli := &serverCli{}
