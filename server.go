@@ -1,8 +1,8 @@
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
 // Licensed under the MIT license.
 // See LICENSE.txt file in the project root for full license information.
-//-----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 package main
 
 import (
@@ -157,7 +157,7 @@ func (t *test) runTCPBandwidthTest(clientParam clientParam, conn net.Conn) {
 			ui.printDbg("Error sending/receiving data on a connection for bandwidth test: %v", err)
 			break
 		}
-		atomic.AddUint64(&t.testResult.bw, uint64(size))
+		atomic.AddUint64(&t.testResult.bw, uint64(n))
 		if clientParam.Reverse {
 			sentBytes += uint64(n)
 			start, waitTime, sentBytes, bytesToSend = enforceThrottle(
